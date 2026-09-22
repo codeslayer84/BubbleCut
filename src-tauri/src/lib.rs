@@ -1,7 +1,7 @@
 mod ffmpeg;
 mod spherical;
 
-use ffmpeg::{ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode};
+use ffmpeg::{ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
@@ -86,6 +86,7 @@ fn start_export(
     app: AppHandle,
     handle: State<'_, ExportHandle>,
     clips: Vec<ExportClip>,
+    cards: Vec<ExportCard>,
     settings: ExportSettings,
 ) -> Result<(), String> {
     if handle.0.lock().unwrap().is_some() {
@@ -97,13 +98,14 @@ fn start_export(
         output.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default(),
         uuid::Uuid::new_v4().simple()
     ));
-    let plan = ffmpeg::build_plan(&clips, &settings, &tmp).map_err(|e| e.to_string())?;
+    let plan = ffmpeg::build_plan(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?;
     let handle = handle.inner().clone();
     let command = std::iter::once("ffmpeg".to_string())
         .chain(plan.args.iter().map(|a| shell_quote(a)))
         .collect::<Vec<_>>()
         .join(" ");
 
+    let plan_temps = plan.temp_files.clone();
     std::thread::spawn(move || {
         let result = (|| -> Result<ExportDone, String> {
             let app2 = app.clone();
@@ -143,6 +145,9 @@ fn start_export(
             })
         })();
         let _ = std::fs::remove_file(&tmp);
+        for f in &plan_temps {
+            let _ = std::fs::remove_file(f);
+        }
         match result {
             Ok(done) => {
                 let _ = app.emit("export:done", done);

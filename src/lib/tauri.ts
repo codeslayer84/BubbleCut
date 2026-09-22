@@ -5,6 +5,7 @@
  */
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { cardPngBase64 } from "./cardRender";
 import type {
   Clip,
   ExportDone,
@@ -13,6 +14,7 @@ import type {
   Progress,
   SphericalCheck,
   StereoMode,
+  TextCard,
 } from "./types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
@@ -39,6 +41,7 @@ export const tagSpherical = (input: string, output: string, stereo: StereoMode) 
 export function startExport(
   clips: Clip[],
   media: Record<string, MediaInfo>,
+  cards: TextCard[],
   settings: ExportSettings,
 ) {
   const exportClips = clips.map((c) => {
@@ -52,9 +55,28 @@ export function startExport(
       roll: c.roll,
       hasAudio: m?.hasAudio ?? false,
       stereoMode: m?.stereoMode ?? "mono",
+      width: m?.width ?? 0,
+      height: m?.height ?? 0,
     };
   });
-  return invoke<void>("start_export", { clips: exportClips, settings });
+  // Cards are rasterised here so the export matches the preview exactly.
+  const exportCards = cards
+    .filter((c) => c.end > c.start && c.text.trim() !== "")
+    .map((c) => {
+      const png = cardPngBase64(c);
+      return {
+        pngBase64: png.base64,
+        pngWidth: png.width,
+        pngHeight: png.height,
+        start: c.start,
+        end: c.end,
+        yaw: c.yaw,
+        pitch: c.pitch,
+        roll: c.roll,
+        widthDeg: c.widthDeg,
+      };
+    });
+  return invoke<void>("start_export", { clips: exportClips, cards: exportCards, settings });
 }
 
 export function onExportEvents(handlers: {

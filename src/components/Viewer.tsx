@@ -1,9 +1,38 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { clipAt, clipLength, useStore } from "../lib/store";
-import { cameraQuaternion } from "../lib/orientation";
+import { cameraQuaternion, cardQuaternion, clipQuaternion } from "../lib/orientation";
+import { renderCard } from "../lib/cardRender";
 import { mediaUrl } from "../lib/tauri";
-import type { MediaInfo } from "../lib/types";
+import type { MediaInfo, TextCard } from "../lib/types";
+
+/** Radius of the card plane; inside the 500-unit sky sphere. */
+const CARD_R = 300;
+
+interface CardMesh {
+  card: TextCard;
+  mesh: THREE.Mesh;
+  texture: THREE.CanvasTexture;
+}
+
+/** Build a plane in the sphere showing the card's canvas. */
+function makeCardMesh(card: TextCard): CardMesh {
+  const canvas = renderCard(card);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+  const w = 2 * CARD_R * Math.tan((card.widthDeg * Math.PI) / 360);
+  const h = w * (canvas.height / canvas.width);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
+  mesh.renderOrder = 10;
+  return { card, mesh, texture };
+}
+
+/** Changing any of these means the canvas must be redrawn. */
+const cardSignature = (c: TextCard) =>
+  [c.text, c.fontSize, c.bold, c.color, c.bgColor, c.bgOpacity, c.padding, c.radius, c.align, c.shadow, c.widthDeg].join("\u0000");
 
 /**
  * 360° preview: an inverted sphere textured with the <video> element.
@@ -20,6 +49,11 @@ export function Viewer() {
     material: THREE.MeshBasicMaterial;
   } | null>(null);
   const loadedPath = useRef<string | null>(null);
+  const cardGroupRef = useRef<THREE.Group | null>(null);
+  const cardMeshes = useRef<CardMesh[]>([]);
+  const tmpQ = new THREE.Quaternion();
+  const tmpClipQ = new THREE.Quaternion();
+  const tmpCardQ = new THREE.Quaternion();
 
   // ---- three.js setup ----------------------------------------------------
   useEffect(() => {
@@ -38,6 +72,10 @@ export function Viewer() {
     texture.minFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
     const material = new THREE.MeshBasicMaterial({ map: texture });
+    const cardGroup = new THREE.Group();
+    scene.add(cardGroup);
+    cardGroupRef.current = cardGroup;
+
     const geometry = new THREE.SphereGeometry(500, 96, 64);
     geometry.scale(-1, 1, 1);
     const sphere = new THREE.Mesh(geometry, material);
@@ -63,6 +101,18 @@ export function Viewer() {
       const { view, clips, playhead } = useStore.getState();
       const at = clipAt(clips, playhead);
       camera.quaternion.copy(cameraQuaternion(at?.clip ?? null, view));
+
+      // Cards live in the exported video's frame, so they ride along with the
+      // current clip's reorientation.
+      const clipQ = at ? clipQuaternion(at.clip, tmpClipQ) : tmpClipQ.identity();
+      for (const cm of cardMeshes.current) {
+        const c = cm.card;
+        cm.mesh.visible = playhead >= c.start && playhead <= c.end;
+        if (!cm.mesh.visible) continue;
+        tmpQ.copy(clipQ).multiply(cardQuaternion(c, tmpCardQ));
+        cm.mesh.quaternion.copy(tmpQ);
+        cm.mesh.position.set(0, 0, -CARD_R).applyQuaternion(tmpQ);
+      }
       if (camera.fov !== view.fov) {
         camera.fov = view.fov;
         camera.updateProjectionMatrix();
@@ -124,8 +174,40 @@ export function Viewer() {
   // ---- playback engine --------------------------------------------------
   const clips = useStore((s) => s.clips);
   const media = useStore((s) => s.media);
+  const cards = useStore((s) => s.cards);
   const playhead = useStore((s) => s.playhead);
   const playing = useStore((s) => s.playing);
+
+  useEffect(() => {
+    const group = cardGroupRef.current;
+    if (!group) return;
+    const existing = new Map(cardMeshes.current.map((cm) => [cm.card.id, cm]));
+    const next: CardMesh[] = [];
+    for (const card of cards) {
+      const prev = existing.get(card.id);
+      if (prev && cardSignature(prev.card) === cardSignature(card)) {
+        prev.card = card; // geometry unchanged, just newer timing/angles
+        next.push(prev);
+        existing.delete(card.id);
+        continue;
+      }
+      if (prev) {
+        group.remove(prev.mesh);
+        prev.mesh.geometry.dispose();
+        prev.texture.dispose();
+        existing.delete(card.id);
+      }
+      const cm = makeCardMesh(card);
+      group.add(cm.mesh);
+      next.push(cm);
+    }
+    for (const stale of existing.values()) {
+      group.remove(stale.mesh);
+      stale.mesh.geometry.dispose();
+      stale.texture.dispose();
+    }
+    cardMeshes.current = next;
+  }, [cards]);
 
   const applyStereo = (m: MediaInfo | undefined) => {
     const t = threeRef.current?.texture;

@@ -273,6 +273,25 @@ pub struct ExportClip {
     pub roll: f64,
     pub has_audio: bool,
     pub stereo_mode: StereoMode,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A text card burned into the exported video. The PNG is rendered by the UI
+/// so that the preview and the export are pixel-identical.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportCard {
+    pub png_base64: String,
+    pub png_width: u32,
+    pub png_height: u32,
+    pub start: f64,
+    pub end: f64,
+    pub yaw: f64,
+    pub pitch: f64,
+    pub roll: f64,
+    /// Horizontal angular size of the card in degrees.
+    pub width_deg: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,6 +315,33 @@ pub struct ExportSettings {
 pub struct ExportPlan {
     pub args: Vec<String>,
     pub total_duration: f64,
+    /// Temporary PNGs written for text cards; deleted after the run.
+    pub temp_files: Vec<PathBuf>,
+}
+
+/// Vertical FOV of a rectilinear card, from its horizontal FOV and aspect.
+fn vertical_fov(h_fov: f64, w: u32, h: u32) -> f64 {
+    let hr = h_fov.to_radians();
+    (2.0 * ((hr / 2.0).tan() * (h as f64 / w as f64)).atan()).to_degrees()
+}
+
+/// Pixel size of the exported frame, needed to project cards at the right size.
+fn output_size(clips: &[ExportClip], s: &ExportSettings) -> (u32, u32) {
+    if s.width > 0 && s.height > 0 {
+        return (s.width, s.height);
+    }
+    let c = &clips[0];
+    // Reduce to a single eye, then re-apply the target layout.
+    let (ew, eh) = match c.stereo_mode {
+        StereoMode::Mono => (c.width, c.height),
+        StereoMode::TopBottom => (c.width, c.height / 2),
+        StereoMode::LeftRight => (c.width / 2, c.height),
+    };
+    match s.stereo_mode {
+        StereoMode::Mono => (ew, eh),
+        StereoMode::TopBottom => (ew, eh * 2),
+        StereoMode::LeftRight => (ew * 2, eh),
+    }
 }
 
 fn stereo_arg(m: &StereoMode) -> &'static str {
@@ -311,7 +357,12 @@ fn fmt(f: f64) -> String {
 }
 
 /// Build the ffmpeg argument list for a sequence of clips.
-pub fn build_plan(clips: &[ExportClip], s: &ExportSettings, tmp_output: &Path) -> Result<ExportPlan, FfError> {
+pub fn build_plan(
+    clips: &[ExportClip],
+    cards: &[ExportCard],
+    s: &ExportSettings,
+    tmp_output: &Path,
+) -> Result<ExportPlan, FfError> {
     if clips.is_empty() {
         return Err(FfError::Other("timeline is empty".into()));
     }
@@ -331,6 +382,23 @@ pub fn build_plan(clips: &[ExportClip], s: &ExportSettings, tmp_output: &Path) -
             "-i".into(),
             "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
         ]);
+    }
+
+    // Card PNGs become extra inputs. A single still frame is enough: overlay
+    // repeats it (eof_action=repeat) for as long as the main stream runs.
+    let card_idx0 = clips.len() + if any_silent { 1 } else { 0 };
+    let mut temp_files: Vec<PathBuf> = Vec::new();
+    for (i, card) in cards.iter().enumerate() {
+        let png = tmp_output.with_file_name(format!(
+            ".{}.card{}.png",
+            tmp_output.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default(),
+            i
+        ));
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &card.png_base64)
+            .map_err(|e| FfError::Other(format!("card {i}: bad PNG data: {e}")))?;
+        std::fs::write(&png, bytes)?;
+        args.extend(["-i".into(), png.to_string_lossy().into_owned()]);
+        temp_files.push(png);
     }
 
     let mut graph: Vec<String> = Vec::new();
@@ -368,9 +436,60 @@ pub fn build_plan(clips: &[ExportClip], s: &ExportSettings, tmp_output: &Path) -
         concat_inputs.push_str(&format!("[v{i}][a{i}]"));
     }
     graph.push(format!(
-        "{concat_inputs}concat=n={}:v=1:a=1[vout][aout]",
+        "{concat_inputs}concat=n={}:v=1:a=1[vcat][aout]",
         clips.len()
     ));
+
+    // Text cards: project each flat card onto the sphere and overlay it.
+    //
+    // v360 discards the input alpha channel, so the alpha plane is extracted
+    // and projected separately with identical parameters, then merged back.
+    // v360's rotations are the opposite sign to ours, hence the negation.
+    let (out_w, out_h) = output_size(clips, s);
+    let (eye_w, eye_h) = match s.stereo_mode {
+        StereoMode::Mono => (out_w, out_h),
+        StereoMode::TopBottom => (out_w, out_h / 2),
+        StereoMode::LeftRight => (out_w / 2, out_h),
+    };
+    let mut last = "vcat".to_string();
+    for (i, card) in cards.iter().enumerate() {
+        let idx = card_idx0 + i;
+        let v360 = format!(
+            "v360=flat:e:ih_fov={:.4}:iv_fov={:.4}:yaw={:.4}:pitch={:.4}:roll={:.4}:w={}:h={}:interp=cubic",
+            card.width_deg,
+            vertical_fov(card.width_deg, card.png_width, card.png_height),
+            -card.yaw,
+            -card.pitch,
+            -card.roll,
+            eye_w,
+            eye_h
+        );
+        graph.push(format!("[{idx}:v]format=rgba,split[cr{i}][ca{i}]"));
+        graph.push(format!("[ca{i}]alphaextract,format=gray,{v360}[cam{i}]"));
+        graph.push(format!("[cr{i}]format=rgb24,{v360},format=rgba[crp{i}]"));
+        graph.push(format!("[crp{i}][cam{i}]alphamerge[card{i}]"));
+        // Both eyes get the same card (zero disparity = at infinity).
+        let card_label = match s.stereo_mode {
+            StereoMode::Mono => format!("card{i}"),
+            StereoMode::TopBottom => {
+                graph.push(format!("[card{i}]split[c{i}a][c{i}b]"));
+                graph.push(format!("[c{i}a][c{i}b]vstack[cardf{i}]"));
+                format!("cardf{i}")
+            }
+            StereoMode::LeftRight => {
+                graph.push(format!("[card{i}]split[c{i}a][c{i}b]"));
+                graph.push(format!("[c{i}a][c{i}b]hstack[cardf{i}]"));
+                format!("cardf{i}")
+            }
+        };
+        let next = format!("ov{i}");
+        graph.push(format!(
+            "[{last}][{card_label}]overlay=0:0:eof_action=repeat:enable='between(t,{:.4},{:.4})'[{next}]",
+            card.start, card.end
+        ));
+        last = next;
+    }
+    graph.push(format!("[{last}]format=yuv420p[vout]"));
 
     args.extend(["-filter_complex".into(), graph.join(";")]);
     args.extend(["-map".into(), "[vout]".into(), "-map".into(), "[aout]".into()]);
@@ -425,7 +544,7 @@ pub fn build_plan(clips: &[ExportClip], s: &ExportSettings, tmp_output: &Path) -
     args.extend(["-progress".into(), "pipe:1".into()]);
     args.push(tmp_output.to_string_lossy().into_owned());
 
-    Ok(ExportPlan { args, total_duration: total })
+    Ok(ExportPlan { args, total_duration: total, temp_files })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -535,6 +654,10 @@ pub fn run(
 mod tests {
     use super::*;
 
+    fn ffmpeg() -> PathBuf {
+        find_binary("ffmpeg").expect("ffmpeg on PATH for tests")
+    }
+
     fn gen(dir: &Path, name: &str, with_audio: bool, secs: u32) -> String {
         let p = dir.join(name);
         let mut c = Command::new(find_binary("ffmpeg").unwrap());
@@ -551,6 +674,171 @@ mod tests {
         p.to_string_lossy().into_owned()
     }
 
+    /// An opaque red bar on a transparent canvas, as a stand-in for a card.
+    fn card_png_base64(dir: &Path) -> (String, u32, u32) {
+        let p = dir.join("card.png");
+        let status = Command::new(ffmpeg())
+            .args([
+                "-y", "-v", "error",
+                "-f", "lavfi", "-i", "color=c=#00000000:s=400x200,format=rgba",
+                "-f", "lavfi", "-i", "color=c=#ff0000:s=300x80,format=rgba",
+                "-filter_complex", "[0][1]overlay=50:60,format=rgba", "-frames:v", "1",
+            ])
+            .arg(&p)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let bytes = std::fs::read(&p).unwrap();
+        (
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
+            400,
+            200,
+        )
+    }
+
+    /// A featureless clip, so any red pixel in the output must be the card.
+    fn gen_plain(dir: &Path, name: &str, secs: u32) -> String {
+        let p = dir.join(name);
+        let status = Command::new(ffmpeg())
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+            .arg(format!("color=c=#203040:size=640x320:rate=30:duration={secs}"))
+            .args(["-f", "lavfi", "-i"])
+            .arg(format!("sine=frequency=440:duration={secs}"))
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"])
+            .arg(&p)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        p.to_string_lossy().into_owned()
+    }
+
+    /// Counts pixels close to pure red in a frame grabbed at `at` seconds.
+    fn red_pixels(video: &str, at: f64) -> usize {
+        let out = Command::new(ffmpeg())
+            .args(["-v", "error", "-ss", &format!("{at}"), "-i", video, "-frames:v", "1",
+                   "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+            .output()
+            .unwrap();
+        out.stdout
+            .chunks_exact(3)
+            .filter(|p| p[0] > 140 && p[1] < 90 && p[2] < 90)
+            .count()
+    }
+
+    #[test]
+    fn text_card_is_burned_in_only_during_its_time_range() {
+        let dir = std::env::temp_dir().join(format!("editor360-card-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen_plain(&dir, "a.mp4", 6);
+        let (png_base64, png_width, png_height) = card_png_base64(&dir);
+        let clips = vec![ExportClip {
+            path: src, in_point: 0.0, out_point: 6.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320,
+        }];
+        let cards = vec![ExportCard {
+            png_base64, png_width, png_height,
+            start: 2.0, end: 4.0,
+            yaw: 0.0, pitch: 0.0, roll: 0.0, width_deg: 60.0,
+        }];
+        let settings = ExportSettings {
+            output: dir.join("out.mp4").to_string_lossy().into_owned(),
+            encoder: "libx264".into(), width: 1024, height: 512, fps: 30.0,
+            video_bitrate_mbps: 8.0, audio_bitrate_kbps: 128,
+            stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
+        };
+        let tmp = dir.join("tmp.mp4");
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
+        assert_eq!(plan.temp_files.len(), 1, "card PNG should be written to disk");
+        run(&plan, &ExportHandle::default(), |_| {}).unwrap();
+
+        let v = tmp.to_string_lossy().into_owned();
+        let before = red_pixels(&v, 1.0);
+        let during = red_pixels(&v, 3.0);
+        let after = red_pixels(&v, 5.0);
+        assert!(during > 2000, "card missing during its range (red px = {during})");
+        assert!(before < 200, "card visible before its range (red px = {before})");
+        assert!(after < 200, "card visible after its range (red px = {after})");
+
+        // Temp PNGs are the caller's to clean up, but they must exist until then.
+        for f in &plan.temp_files {
+            assert!(f.exists());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Bounding box of red pixels in a frame, as fractions of width/height.
+    fn red_bbox(video: &str, at: f64, w: usize, h: usize) -> Option<(f64, f64, f64, f64)> {
+        let out = Command::new(ffmpeg())
+            .args(["-v", "error", "-ss", &format!("{at}"), "-i", video, "-frames:v", "1",
+                   "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+            .output()
+            .unwrap();
+        let d = &out.stdout;
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 3;
+                if i + 2 < d.len() && d[i] > 140 && d[i + 1] < 90 && d[i + 2] < 90 {
+                    x0 = x0.min(x); x1 = x1.max(x); y0 = y0.min(y); y1 = y1.max(y);
+                }
+            }
+        }
+        if x0 == usize::MAX { return None; }
+        Some((x0 as f64 / w as f64, x1 as f64 / w as f64, y0 as f64 / h as f64, y1 as f64 / h as f64))
+    }
+
+    /// The exported card must land where the preview's maths says it will:
+    /// centred on its yaw/pitch and spanning `width_deg` of the sphere.
+    #[test]
+    fn card_geometry_matches_preview_maths() {
+        let dir = std::env::temp_dir().join(format!("editor360-geom-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen_plain(&dir, "a.mp4", 3);
+        // Card canvas is 400x200 with the red bar filling 300x80 centred in it,
+        // so the bar spans 3/4 of the card's width.
+        let (png_base64, png_width, png_height) = card_png_base64(&dir);
+        const YAW: f64 = 45.0;
+        const CARD_DEG: f64 = 40.0;
+        // The clip is reoriented as well: cards live in the *output* frame, so
+        // the clip's own yaw must not drag the card along with it.
+        let clips = vec![ExportClip {
+            path: src, in_point: 0.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320,
+        }];
+        let cards = vec![ExportCard {
+            png_base64, png_width, png_height,
+            start: 0.0, end: 3.0, yaw: YAW, pitch: 0.0, roll: 0.0, width_deg: CARD_DEG,
+        }];
+        let (w, h) = (1024usize, 512usize);
+        let settings = ExportSettings {
+            output: dir.join("out.mp4").to_string_lossy().into_owned(),
+            encoder: "libx264".into(), width: w as u32, height: h as u32, fps: 30.0,
+            video_bitrate_mbps: 12.0, audio_bitrate_kbps: 128,
+            stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
+        };
+        let tmp = dir.join("tmp.mp4");
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
+        run(&plan, &ExportHandle::default(), |_| {}).unwrap();
+
+        let (x0, x1, y0, y1) = red_bbox(&tmp.to_string_lossy(), 1.5, w, h).expect("card not found");
+        let centre_x = (x0 + x1) / 2.0;
+        let expected_x = 0.5 + YAW / 360.0; // +yaw looks right => right of centre
+        assert!((centre_x - expected_x).abs() < 0.01,
+                "card centred at {centre_x:.3} of width, expected {expected_x:.3}");
+
+        let centre_y = (y0 + y1) / 2.0;
+        assert!((centre_y - 0.5).abs() < 0.01, "card should sit on the equator, got {centre_y:.3}");
+
+        // The red bar covers 3/4 of the 40-degree card.
+        let span_deg = (x1 - x0) * 360.0;
+        let expected_span = CARD_DEG * 0.75;
+        assert!((span_deg - expected_span).abs() < 2.0,
+                "card spans {span_deg:.1} degrees, expected about {expected_span:.1}");
+
+        for f in &plan.temp_files { let _ = std::fs::remove_file(f); }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn export_two_clips_end_to_end() {
         let dir = std::env::temp_dir().join(format!("editor360-export-{}", uuid::Uuid::new_v4()));
@@ -558,8 +846,8 @@ mod tests {
         let a = gen(&dir, "a.mp4", true, 4);
         let b = gen(&dir, "b.mp4", false, 4);
         let clips = vec![
-            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono },
-            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono },
+            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320 },
+            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320 },
         ];
         let encoders = available_encoders().unwrap();
         let encoder = if encoders.iter().any(|e| e == "libx264") { "libx264" } else { &encoders[0] }.to_string();
@@ -569,7 +857,7 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
         assert!((plan.total_duration - 3.5).abs() < 1e-6);
 
         let handle = ExportHandle::default();

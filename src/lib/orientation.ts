@@ -16,6 +16,14 @@ const Y = new THREE.Vector3(0, 1, 0);
 const X = new THREE.Vector3(1, 0, 0);
 const Z = new THREE.Vector3(0, 0, 1);
 
+/**
+ * Orientation of a text card, in the exported video's frame of reference.
+ * Same sign convention as clip orientation.
+ */
+export function cardQuaternion(c: { yaw: number; pitch: number; roll: number }, out = new THREE.Quaternion()) {
+  return clipQuaternion(c, out);
+}
+
 export function clipQuaternion(c: Pick<Clip, "yaw" | "pitch" | "roll">, out = new THREE.Quaternion()) {
   const qy = new THREE.Quaternion().setFromAxisAngle(Y, -c.yaw * D2R);
   const qp = new THREE.Quaternion().setFromAxisAngle(X, c.pitch * D2R);
@@ -48,3 +56,12 @@ export function frontFromView(c: Clip, v: View): { yaw: number; pitch: number; r
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * Direction the user is currently looking, expressed in the exported video's
+ * frame — i.e. the yaw/pitch to give a card so it lands under the reticle.
+ * The clip's own reorientation cancels out, so this is just the view angles.
+ */
+export function cardAnglesFromView(v: View): { yaw: number; pitch: number } {
+  return { yaw: round1(v.lon), pitch: round1(v.lat) };
+}

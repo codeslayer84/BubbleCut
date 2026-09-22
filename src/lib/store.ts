@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Clip, ExportSettings, MediaInfo, ProjectFile } from "./types";
+import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -23,10 +23,32 @@ export interface View {
   fov: number;
 }
 
+export const defaultCard = (start: number, end: number, yaw: number, pitch: number): TextCard => ({
+  id: Math.random().toString(36).slice(2, 10),
+  text: "New text",
+  start,
+  end,
+  yaw,
+  pitch,
+  roll: 0,
+  widthDeg: 40,
+  fontSize: 120,
+  bold: true,
+  color: "#ffffff",
+  bgColor: "#000000",
+  bgOpacity: 0.55,
+  padding: 48,
+  radius: 32,
+  align: "center",
+  shadow: true,
+});
+
 interface State {
   media: Record<string, MediaInfo>;
   clips: Clip[];
+  cards: TextCard[];
   selectedClipId: string | null;
+  selectedCardId: string | null;
   playhead: number;
   playing: boolean;
   view: View;
@@ -37,6 +59,10 @@ interface State {
   addMedia: (m: MediaInfo, appendToTimeline?: boolean) => void;
   removeMedia: (path: string) => void;
   appendClip: (mediaPath: string) => void;
+  addCard: (card: TextCard) => void;
+  updateCard: (id: string, patch: Partial<TextCard>) => void;
+  removeCard: (id: string) => void;
+  selectCard: (id: string | null) => void;
   updateClip: (id: string, patch: Partial<Clip>) => void;
   removeClip: (id: string) => void;
   moveClip: (id: string, dir: -1 | 1) => void;
@@ -54,7 +80,9 @@ interface State {
 export const useStore = create<State>((set, get) => ({
   media: {},
   clips: [],
+  cards: [],
   selectedClipId: null,
+  selectedCardId: null,
   playhead: 0,
   playing: false,
   view: { lon: 0, lat: 0, fov: 90 },
@@ -94,6 +122,16 @@ export const useStore = create<State>((set, get) => ({
         dirty: true,
       };
     }),
+  addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
+  updateCard: (id, patch) =>
+    set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)), dirty: true })),
+  removeCard: (id) =>
+    set((s) => ({
+      cards: s.cards.filter((c) => c.id !== id),
+      selectedCardId: s.selectedCardId === id ? null : s.selectedCardId,
+      dirty: true,
+    })),
+  selectCard: (id) => set({ selectedCardId: id }),
   updateClip: (id, patch) =>
     set((s) => ({
       clips: s.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)),
@@ -144,7 +182,9 @@ export const useStore = create<State>((set, get) => ({
     set({
       media: Object.fromEntries(p.media.map((m) => [m.path, m])),
       clips: p.clips,
+      cards: p.cards ?? [],
       selectedClipId: p.clips[0]?.id ?? null,
+      selectedCardId: null,
       playhead: 0,
       playing: false,
       exportSettings: { ...defaultExportSettings, ...p.exportSettings },
@@ -156,7 +196,9 @@ export const useStore = create<State>((set, get) => ({
     set({
       media: {},
       clips: [],
+      cards: [],
       selectedClipId: null,
+      selectedCardId: null,
       playhead: 0,
       playing: false,
       exportSettings: defaultExportSettings,
@@ -210,6 +252,7 @@ export function toProjectFile(s: State): ProjectFile {
     version: 1,
     media: Object.values(s.media).map(({ blobUrl: _b, ...m }) => m),
     clips: s.clips,
+    cards: s.cards,
     exportSettings: s.exportSettings,
   };
 }

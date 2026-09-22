@@ -30,6 +30,29 @@ export interface Clip {
   roll: number;
 }
 
+export interface TextCard {
+  id: string;
+  text: string;
+  /** Timeline seconds. */
+  start: number;
+  end: number;
+  /** Direction in the exported video, same convention as clip orientation. */
+  yaw: number;
+  pitch: number;
+  roll: number;
+  /** Horizontal angular size of the card, in degrees. */
+  widthDeg: number;
+  fontSize: number;
+  bold: boolean;
+  color: string;
+  bgColor: string;
+  bgOpacity: number;
+  padding: number;
+  radius: number;
+  align: "left" | "center" | "right";
+  shadow: boolean;
+}
+
 export interface ExportSettings {
   output: string;
   encoder: string;
@@ -83,5 +106,6 @@ export interface ProjectFile {
   version: 1;
   media: MediaInfo[];
   clips: Clip[];
+  cards?: TextCard[];
   exportSettings: Partial<ExportSettings>;
 }
