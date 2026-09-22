@@ -22,7 +22,10 @@ decode/encode step.
   and the exported PNG, so what you see is exactly what gets burned in.
   In export they are projected with `v360=flat:e` so they read as flat signs
   in a headset instead of being smeared across the equirectangular frame.
-  Each card can fade in and out.
+  Each card can fade in and out. New cards span the whole video by default.
+  While a card is selected and playback is paused it is drawn at full opacity
+  so it can be positioned even when the playhead sits inside one of its fades;
+  playback shows the real opacity, and the panel reports it.
 - **Export**: single ffmpeg run (trim → `v360` → concat → encode), hardware
   HEVC/H.264 via VideoToolbox, presets for YouTube VR / Quest / Vision Pro,
   live progress + ETA, cancel.

@@ -1,3 +1,4 @@
+import { cardOpacity } from "../lib/cardRender";
 import { cardAnglesFromView } from "../lib/orientation";
 import { defaultCard, fmtTime, timelineDuration, useStore } from "../lib/store";
 import type { TextCard } from "../lib/types";
@@ -25,9 +26,15 @@ export function CardPanel() {
 
   const add = () => {
     const { yaw, pitch } = cardAnglesFromView(view);
-    const start = playhead;
-    const end = Math.min(total || start + 5, start + 5);
-    addCard(defaultCard(start, Math.max(end, start + 0.5), yaw, pitch));
+    // Span the whole video by default; trim it afterwards if you want.
+    const card = defaultCard(0, Math.max(total, 1), yaw, pitch);
+    addCard(card);
+    // A card created while the playhead sits inside its fade would be drawn
+    // fully transparent, which looks like nothing happened. Step just past
+    // the fade so the new card is actually visible.
+    if (cardOpacity(card, playhead) < 1) {
+      setPlayhead(Math.min(card.end, card.start + card.fadeIn));
+    }
   };
 
   return (
@@ -58,6 +65,25 @@ export function CardPanel() {
       )}
 
       {!card && cards.length > 0 && <p className="hint">Select a card above to edit it.</p>}
+
+      {card && cardOpacity(card, playhead) < 1 && (
+        <p className="hint">
+          {playhead < card.start || playhead > card.end ? (
+            <>
+              Not on screen at the playhead.{" "}
+              <button className="chip" onClick={() => setPlayhead(Math.min(card.end, card.start + card.fadeIn))}>
+                Jump to it
+              </button>
+            </>
+          ) : (
+            <>
+              Shown solid while selected so you can edit it; here it is really{" "}
+              {Math.round(cardOpacity(card, playhead) * 100)}% opaque (mid-fade). Press play to see the
+              real fade.
+            </>
+          )}
+        </p>
+      )}
 
       {card && (
         <>

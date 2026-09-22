@@ -105,9 +105,15 @@ export function Viewer() {
       // Cards live in the exported video's frame, so they ride along with the
       // current clip's reorientation.
       const clipQ = at ? clipQuaternion(at.clip, tmpClipQ) : tmpClipQ.identity();
+      const { selectedCardId, playing } = useStore.getState();
       for (const cm of cardMeshes.current) {
         const c = cm.card;
-        const opacity = cardOpacity(c, playhead);
+        const inRange = playhead >= c.start && playhead <= c.end;
+        // While paused, the card being edited is drawn solid so it can be
+        // positioned and styled even when the playhead sits inside a fade.
+        // Playback always shows the real opacity.
+        const editing = !playing && c.id === selectedCardId && inRange;
+        const opacity = editing ? 1 : cardOpacity(c, playhead);
         cm.mesh.visible = opacity > 0.001;
         if (!cm.mesh.visible) continue;
         (cm.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
@@ -177,6 +183,7 @@ export function Viewer() {
   const clips = useStore((s) => s.clips);
   const media = useStore((s) => s.media);
   const cards = useStore((s) => s.cards);
+  useStore((s) => s.selectedCardId); // re-render the loop's closure inputs
   const playhead = useStore((s) => s.playhead);
   const playing = useStore((s) => s.playing);
 
