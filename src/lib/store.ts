@@ -14,6 +14,7 @@ export const defaultExportSettings: ExportSettings = {
   stereoMode: "mono",
   faststart: true,
   injectSpherical: true,
+  burnCards: true,
 };
 
 /** Look direction of the preview camera (degrees), independent of clips. */

@@ -67,6 +67,8 @@ export interface ExportSettings {
   stereoMode: StereoMode;
   faststart: boolean;
   injectSpherical: boolean;
+  /** Burn text cards into the pixels. Off = export them as a CAVA sidecar. */
+  burnCards: boolean;
 }
 
 export interface Progress {

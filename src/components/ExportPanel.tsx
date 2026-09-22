@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
 import {
-  cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, startExport, type FfmpegInfo,
+  cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, startExport,
+  writeTextFile, type FfmpegInfo,
 } from "../lib/tauri";
 import type { ExportDone, Progress, StereoMode } from "../lib/types";
+import { buildCavaCardFile, cavaSidecarPath } from "../lib/cavaExport";
+import { CARD_MAX_W } from "../lib/cardRender";
 
 const ENCODER_LABELS: Record<string, string> = {
   hevc_videotoolbox: "HEVC / H.265 — Apple hardware (fast, recommended)",
@@ -44,6 +47,7 @@ export function ExportPanel() {
   const [done, setDone] = useState<ExportDone | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCmd, setShowCmd] = useState(false);
+  const [sidecar, setSidecar] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isTauri) { setInfoError("Export needs the desktop app (run `npm run tauri dev`)."); return; }
@@ -77,6 +81,20 @@ export function ExportPanel() {
     const p = await pickSavePath(settings.output || "export_360.mp4");
     if (p) setExportSettings({ output: p });
   };
+  const saveSidecar = async () => {
+    setError(null);
+    try {
+      const first = media[clips[0]?.mediaPath];
+      const videoName = settings.output.split("/").pop() ?? "video.mp4";
+      const file = buildCavaCardFile(cards, videoName, first?.stereoMode ?? "mono", CARD_MAX_W);
+      const path = cavaSidecarPath(settings.output);
+      await writeTextFile(path, JSON.stringify(file, null, 2));
+      setSidecar(path);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const run = async () => {
     setDone(null); setError(null);
     setProgress({ percent: 0, outTime: 0, speed: "", fps: 0, stage: "starting" });
@@ -162,15 +180,31 @@ export function ExportPanel() {
         <div className="field checks">
           <label><input type="checkbox" checked={settings.injectSpherical} onChange={(e) => setExportSettings({ injectSpherical: e.target.checked })} /> Write 360° metadata (v1 + v2)</label>
           <label><input type="checkbox" checked={settings.faststart} onChange={(e) => setExportSettings({ faststart: e.target.checked })} /> Fast start (web streaming)</label>
+          <label><input type="checkbox" checked={settings.burnCards} onChange={(e) => setExportSettings({ burnCards: e.target.checked })} /> Burn text cards into the video</label>
         </div>
       </div>
+
+      {cards.length > 0 && !settings.burnCards && (
+        <div className="hint">
+          Cards stay out of the pixels. Save them beside the video for CAVA360VR, where they
+          become objects you can grab and move.
+        </div>
+      )}
+      {cards.length > 0 && (
+        <div className="row">
+          <button onClick={saveSidecar} disabled={!isTauri || !settings.output}>
+            Save cards for CAVA360VR (.cards.json)
+          </button>
+        </div>
+      )}
+      {sidecar && <div className="hint">Wrote {sidecar}</div>}
 
       <div className="row">
         <button className="primary big" onClick={run} disabled={!canExport}>
           {running
             ? "Exporting…"
             : `Export ${fmtTime(total)} · ${clips.length} clip${clips.length === 1 ? "" : "s"}` +
-              (activeCards ? ` · ${activeCards} card${activeCards === 1 ? "" : "s"}` : "")}
+              (activeCards && settings.burnCards ? ` · ${activeCards} card${activeCards === 1 ? "" : "s"}` : "")}
         </button>
         {running && <button className="danger" onClick={() => cancelExport()}>Cancel</button>}
       </div>

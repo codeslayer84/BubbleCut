@@ -34,6 +34,10 @@ decode/encode step.
   verified two ways (our parser + ffprobe) and the result is shown in the UI.
 - **Tools → Tag existing MP4 as 360°**: inject metadata into any file without
   re-encoding (seconds, not hours).
+- **CAVA360VR export**: untick "Burn text cards into the video" and save the
+  cards as a `.cards.json` sidecar instead. In CAVA the cards become objects in
+  the sphere that can be pointed at and moved, rather than pixels. See
+  `Assets/Scripts/Cards/README.md` in the CAVA project.
 - Save / open projects (`*.360edit.json`).
 
 ## Requirements

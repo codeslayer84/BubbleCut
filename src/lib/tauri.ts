@@ -66,7 +66,8 @@ export function startExport(
     };
   });
   // Cards are rasterised here so the export matches the preview exactly.
-  const exportCards = cards
+  // With burnCards off they stay out of the video and travel as a sidecar.
+  const exportCards = (settings.burnCards ? cards : [])
     .filter((c) => c.end > c.start && c.text.trim() !== "")
     .map((c) => {
       const png = cardPngBase64(c);
