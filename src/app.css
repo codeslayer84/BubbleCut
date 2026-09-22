@@ -108,3 +108,5 @@ aside.right { border-left: 1px solid var(--border); }
 
 .filter-item { background: var(--panel-2); border-radius: 6px; padding: 8px; margin: 6px 0; }
 .filters .angle { grid-template-columns: 90px 1fr 58px 6px; }
+
+button.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }

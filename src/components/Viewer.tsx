@@ -107,8 +107,8 @@ export function Viewer() {
 
       // Filters run on the equirectangular frame, before it is wrapped onto
       // the sphere, which is where the exporter applies them as well.
-      const { filters, previewFilters, media } = useStore.getState();
-      const active = previewFilters ? filters : [];
+      const { previewFilters, media } = useStore.getState();
+      const active = previewFilters && at ? at.clip.filters : [];
       chain.setChain(active);
       const m = at ? media[at.clip.mediaPath] : undefined;
       const filtered = active.length && m

@@ -38,7 +38,6 @@ export function ExportPanel() {
   const clips = useStore((s) => s.clips);
   const media = useStore((s) => s.media);
   const cards = useStore((s) => s.cards);
-  const filters = useStore((s) => s.filters);
   const settings = useStore((s) => s.exportSettings);
   const { setExportSettings } = useStore.getState();
 
@@ -75,6 +74,7 @@ export function ExportPanel() {
 
   const total = timelineDuration(clips);
   const activeCards = cards.filter((c) => c.end > c.start && c.text.trim() !== "").length;
+  const filterCount = clips.reduce((n, c) => n + c.filters.length, 0);
   const running = progress !== null;
   const canExport = isTauri && clips.length > 0 && !!settings.output && !running;
 
@@ -99,7 +99,7 @@ export function ExportPanel() {
   const run = async () => {
     setDone(null); setError(null);
     setProgress({ percent: 0, outTime: 0, speed: "", fps: 0, stage: "starting" });
-    try { await startExport(clips, media, cards, filters, settings); } catch (e) { setError(String(e)); setProgress(null); }
+    try { await startExport(clips, media, cards, settings); } catch (e) { setError(String(e)); setProgress(null); }
   };
 
   const eta = progress && progress.percent > 1 && progress.speed
@@ -206,7 +206,7 @@ export function ExportPanel() {
             ? "Exporting…"
             : `Export ${fmtTime(total)} · ${clips.length} clip${clips.length === 1 ? "" : "s"}` +
               (activeCards && settings.burnCards ? ` · ${activeCards} card${activeCards === 1 ? "" : "s"}` : "") +
-              (filters.length ? ` · ${filters.length} filter${filters.length === 1 ? "" : "s"}` : "")}
+              (filterCount ? ` · ${filterCount} filter${filterCount === 1 ? "" : "s"}` : "")}
         </button>
         {running && <button className="danger" onClick={() => cancelExport()}>Cancel</button>}
       </div>

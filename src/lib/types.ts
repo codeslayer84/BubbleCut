@@ -28,6 +28,8 @@ export interface Clip {
   yaw: number;
   pitch: number;
   roll: number;
+  /** Image filters applied to this clip only, in order. */
+  filters: FilterInstance[];
 }
 
 export interface TextCard {

@@ -19,6 +19,19 @@ use crate::ffmpeg::{
 };
 use crate::gpufilters::{FilterGpu, FilterSpec};
 
+/// Which frames belong to which clip, so each clip's own filters can be used.
+/// The frames arrive as one concatenated stream, so this is just the clip
+/// boundaries converted to frame numbers.
+pub fn clip_frame_bounds(clips: &[ExportClip], fps: f64) -> Vec<u64> {
+    let mut bounds = Vec::with_capacity(clips.len());
+    let mut acc = 0.0;
+    for c in clips {
+        acc += (c.out_point - c.in_point).max(0.0);
+        bounds.push((acc * fps).round() as u64);
+    }
+    bounds
+}
+
 pub struct FilteredPlan {
     /// Pulls the joined audio out first. It has to finish before the encoder
     /// starts, otherwise the encoder waits on a half-written file while the
@@ -32,6 +45,8 @@ pub struct FilteredPlan {
     pub total_duration: f64,
     pub total_frames: u64,
     pub temp_files: Vec<PathBuf>,
+    /// Frame index at which each clip ends.
+    pub clip_bounds: Vec<u64>,
 }
 
 /// Builds the two ffmpeg commands that sit either side of the GPU.
@@ -97,15 +112,18 @@ pub fn build(
         total_duration: base.total_duration,
         total_frames: (base.total_duration * fps).ceil() as u64,
         temp_files,
+        clip_bounds: clip_frame_bounds(clips, fps),
     })
 }
 
 
 
 /// Runs decode -> GPU -> encode, reporting progress per frame.
+/// `chains` holds one filter chain per clip; a clip with an empty chain has
+/// its frames passed through untouched.
 pub fn run(
     plan: &FilteredPlan,
-    filters: &[FilterSpec],
+    chains: &[Vec<FilterSpec>],
     handle: &ExportHandle,
     mut on_progress: impl FnMut(Progress),
 ) -> Result<(), FfError> {
@@ -149,7 +167,13 @@ pub fn run(
     let dec_log = drain(dec_err);
     let enc_log = drain(enc_err);
 
-    let mut gpu = FilterGpu::new().map_err(|e| FfError::Other(e.to_string()))?;
+    // Only spin the GPU up if something actually needs filtering.
+    let any = chains.iter().any(|c| !c.is_empty());
+    let mut gpu = if any {
+        Some(FilterGpu::new().map_err(|e| FfError::Other(e.to_string()))?)
+    } else {
+        None
+    };
     let frame_bytes = (plan.width as usize) * (plan.height as usize) * 4;
     let mut frame = vec![0u8; frame_bytes];
     let mut filtered = Vec::with_capacity(frame_bytes);
@@ -162,10 +186,24 @@ pub fn run(
             n if n < frame_bytes => break Ok(()), // trailing partial frame
             _ => {}
         }
-        if let Err(e) = gpu.process(&frame, plan.width, plan.height, filters, &mut filtered) {
-            break Err(FfError::Other(e.to_string()));
-        }
-        if let Err(e) = enc_in.write_all(&filtered) {
+        // Pick the chain belonging to the clip this frame came from.
+        let clip_index = plan
+            .clip_bounds
+            .iter()
+            .position(|&end| frames_done < end)
+            .unwrap_or(plan.clip_bounds.len().saturating_sub(1));
+        let chain = chains.get(clip_index).map(|c| c.as_slice()).unwrap_or(&[]);
+
+        let to_write: &[u8] = if chain.is_empty() {
+            &frame
+        } else {
+            let gpu = gpu.as_mut().expect("a chain implies the GPU was started");
+            if let Err(e) = gpu.process(&frame, plan.width, plan.height, chain, &mut filtered) {
+                break Err(FfError::Other(e.to_string()));
+            }
+            &filtered
+        };
+        if let Err(e) = enc_in.write_all(to_write) {
             // A dead encoder means its own log explains why.
             break Err(FfError::Io(e));
         }
@@ -312,7 +350,7 @@ mod tests {
             st.encoder = "hevc_videotoolbox".into();
             st.video_bitrate_mbps = 60.0;
 
-            let filters = vec![FilterSpec { name: filter.into(), params: HashMap::new() }];
+            let filters = vec![vec![FilterSpec { name: filter.into(), params: HashMap::new() }]];
             let plan = build(&clips, &[], &st, &tmp).unwrap();
             let started = std::time::Instant::now();
             run(&plan, &filters, &ExportHandle::default(), |_| {}).unwrap();
@@ -320,6 +358,53 @@ mod tests {
             println!("{filter:<10} 4K {secs}s -> {elapsed:6.2}s  = {:.2}x realtime", secs as f64 / elapsed);
             cleanup(&plan);
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Two clips, only the second filtered: the frames must change partway
+    /// through and not before.
+    #[test]
+    fn filters_apply_per_clip() {
+        let dir = std::env::temp_dir().join(format!("editor360-perclip-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen(&dir, 4);
+        let out = dir.join("out.mp4");
+        let tmp = dir.join("tmp.mp4");
+
+        // Same source twice, so any difference comes from the filters alone.
+        let mut a = clip(src.clone());
+        a.in_point = 0.0;
+        a.out_point = 2.0;
+        let mut b = clip(src);
+        b.in_point = 0.0;
+        b.out_point = 2.0;
+        let clips = vec![a, b];
+
+        let chains = vec![
+            vec![],
+            vec![FilterSpec { name: "Grayscale".into(), params: HashMap::new() }],
+        ];
+        let plan = build(&clips, &[], &settings(&out), &tmp).unwrap();
+        assert_eq!(plan.clip_bounds, vec![60, 120]);
+        run(&plan, &chains, &ExportHandle::default(), |_| {}).unwrap();
+
+        let colourfulness = |at: &str| -> usize {
+            let bytes = Command::new(ffmpeg::find_binary("ffmpeg").unwrap())
+                .args(["-v", "error", "-ss", at, "-i"])
+                .arg(&tmp)
+                .args(["-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+                .output().unwrap().stdout;
+            bytes.chunks_exact(3)
+                .filter(|p| (p[0] as i32 - p[1] as i32).abs() > 12 || (p[1] as i32 - p[2] as i32).abs() > 12)
+                .count()
+        };
+
+        let first = colourfulness("1.0");
+        let second = colourfulness("3.0");
+        assert!(first > 1000, "first clip should keep its colour ({first})");
+        assert!(second < first / 20, "second clip should be grey ({second} vs {first})");
+
+        cleanup(&plan);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -334,7 +419,7 @@ mod tests {
         let tmp = dir.join("tmp.mp4");
 
         let clips = vec![clip(src)];
-        let filters = vec![FilterSpec { name: "Grayscale".into(), params: HashMap::new() }];
+        let filters = vec![vec![FilterSpec { name: "Grayscale".into(), params: HashMap::new() }]];
         let plan = build(&clips, &[], &settings(&out), &tmp).unwrap();
         assert_eq!((plan.width, plan.height), (640, 320));
         assert_eq!(plan.total_frames, 60);

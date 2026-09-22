@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Clip, ExportSettings, FilterInstance, MediaInfo, ProjectFile, TextCard } from "./types";
+import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -50,8 +50,6 @@ interface State {
   media: Record<string, MediaInfo>;
   clips: Clip[];
   cards: TextCard[];
-  /** Image filters applied to the whole timeline, in order. */
-  filters: FilterInstance[];
   previewFilters: boolean;
   selectedClipId: string | null;
   selectedCardId: string | null;
@@ -65,10 +63,11 @@ interface State {
   addMedia: (m: MediaInfo, appendToTimeline?: boolean) => void;
   removeMedia: (path: string) => void;
   appendClip: (mediaPath: string) => void;
-  addFilter: (name: string, params: Record<string, number>) => void;
-  updateFilter: (id: string, params: Record<string, number>) => void;
-  removeFilter: (id: string) => void;
-  moveFilter: (id: string, dir: -1 | 1) => void;
+  addFilter: (clipId: string, name: string, params: Record<string, number>) => void;
+  updateFilter: (clipId: string, id: string, params: Record<string, number>) => void;
+  removeFilter: (clipId: string, id: string) => void;
+  moveFilter: (clipId: string, id: string, dir: -1 | 1) => void;
+  copyFiltersToAllClips: (clipId: string) => void;
   setPreviewFilters: (on: boolean) => void;
   addCard: (card: TextCard) => void;
   updateCard: (id: string, patch: Partial<TextCard>) => void;
@@ -92,7 +91,6 @@ export const useStore = create<State>((set, get) => ({
   media: {},
   clips: [],
   cards: [],
-  filters: [],
   previewFilters: true,
   selectedClipId: null,
   selectedCardId: null,
@@ -125,6 +123,7 @@ export const useStore = create<State>((set, get) => ({
         yaw: 0,
         pitch: 0,
         roll: 0,
+        filters: [],
       };
       // Park the playhead on the new clip so the preview shows what's being edited.
       return {
@@ -135,25 +134,61 @@ export const useStore = create<State>((set, get) => ({
         dirty: true,
       };
     }),
-  addFilter: (name, params) =>
+  addFilter: (clipId, name, params) =>
     set((s) => ({
-      filters: [...s.filters, { id: Math.random().toString(36).slice(2, 10), name, params }],
+      clips: s.clips.map((c) =>
+        c.id === clipId
+          ? { ...c, filters: [...c.filters, { id: newId(), name, params }] }
+          : c,
+      ),
       dirty: true,
     })),
-  updateFilter: (id, params) =>
+  updateFilter: (clipId, id, params) =>
     set((s) => ({
-      filters: s.filters.map((f) => (f.id === id ? { ...f, params: { ...f.params, ...params } } : f)),
+      clips: s.clips.map((c) =>
+        c.id === clipId
+          ? {
+              ...c,
+              filters: c.filters.map((f) =>
+                f.id === id ? { ...f, params: { ...f.params, ...params } } : f,
+              ),
+            }
+          : c,
+      ),
       dirty: true,
     })),
-  removeFilter: (id) => set((s) => ({ filters: s.filters.filter((f) => f.id !== id), dirty: true })),
-  moveFilter: (id, dir) =>
+  removeFilter: (clipId, id) =>
+    set((s) => ({
+      clips: s.clips.map((c) =>
+        c.id === clipId ? { ...c, filters: c.filters.filter((f) => f.id !== id) } : c,
+      ),
+      dirty: true,
+    })),
+  moveFilter: (clipId, id, dir) =>
+    set((s) => ({
+      clips: s.clips.map((c) => {
+        if (c.id !== clipId) return c;
+        const i = c.filters.findIndex((f) => f.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= c.filters.length) return c;
+        const filters = [...c.filters];
+        [filters[i], filters[j]] = [filters[j], filters[i]];
+        return { ...c, filters };
+      }),
+      dirty: true,
+    })),
+  copyFiltersToAllClips: (clipId) =>
     set((s) => {
-      const i = s.filters.findIndex((f) => f.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= s.filters.length) return {};
-      const filters = [...s.filters];
-      [filters[i], filters[j]] = [filters[j], filters[i]];
-      return { filters, dirty: true };
+      const source = s.clips.find((c) => c.id === clipId);
+      if (!source) return {};
+      return {
+        clips: s.clips.map((c) => ({
+          ...c,
+          // Fresh ids, so each clip's filters can be edited independently.
+          filters: source.filters.map((f) => ({ ...f, id: newId(), params: { ...f.params } })),
+        })),
+        dirty: true,
+      };
     }),
   setPreviewFilters: (previewFilters) => set({ previewFilters }),
   addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
@@ -215,10 +250,14 @@ export const useStore = create<State>((set, get) => ({
   loadProject: (p, path) =>
     set({
       media: Object.fromEntries(p.media.map((m) => [m.path, m])),
-      clips: p.clips,
       // Older projects predate fades, so the fields may be missing at runtime.
       cards: (p.cards ?? []).map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
-      filters: p.filters ?? [],
+      // Filters used to be timeline-wide; an older project's chain becomes
+      // every clip's chain so nothing silently stops being applied.
+      clips: p.clips.map((c) => ({
+        ...c,
+        filters: c.filters ?? (p.filters ?? []).map((f) => ({ ...f, id: newId() })),
+      })),
       selectedClipId: p.clips[0]?.id ?? null,
       selectedCardId: null,
       playhead: 0,
@@ -233,7 +272,6 @@ export const useStore = create<State>((set, get) => ({
       media: {},
       clips: [],
       cards: [],
-      filters: [],
       selectedClipId: null,
       selectedCardId: null,
       playhead: 0,
@@ -290,7 +328,6 @@ export function toProjectFile(s: State): ProjectFile {
     media: Object.values(s.media).map(({ blobUrl: _b, ...m }) => m),
     clips: s.clips,
     cards: s.cards,
-    filters: s.filters,
     exportSettings: s.exportSettings,
   };
 }

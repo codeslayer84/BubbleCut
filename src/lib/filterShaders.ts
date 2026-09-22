@@ -25,20 +25,22 @@ export interface FilterDef {
   recompileOn?: string;
 }
 
+// three.js injects its own common chunk, which already defines luminance().
+// Redefining it fails to compile, so everything here carries a prefix.
 const LUMINANCE = `
-  float luminance(vec3 c) {
+  float mashLuminance(vec3 c) {
     vec3 lin = sqrt(c);
     return lin.r * 0.2126 + lin.g * 0.7152 + lin.b * 0.0722;
   }
-  float edgeStrengthWithDelta(vec2 start, vec2 delta) {
+  float mashEdgeDelta(vec2 start, vec2 delta) {
     vec2 perp = vec2(delta.y, -delta.x);
     float before = 0.0;
     for (int i = -1; i <= 1; i++) {
-      before += luminance(texture2D(uSampler, start - delta + float(i) * perp).rgb);
+      before += mashLuminance(texture2D(uSampler, start - delta + float(i) * perp).rgb);
     }
     float after = 0.0;
     for (int i = -1; i <= 1; i++) {
-      after += luminance(texture2D(uSampler, start + delta + float(i) * perp).rgb);
+      after += mashLuminance(texture2D(uSampler, start + delta + float(i) * perp).rgb);
     }
     return (after - before) * 0.3333;
   }`;
@@ -91,18 +93,18 @@ export const FILTERS: FilterDef[] = [
     ],
     fragment: `
       ${LUMINANCE}
-      float edgeStrength(vec2 coords) {
+      float mashEdgeStrength(vec2 coords) {
         float aspect = uInvHeight / uInvWidth;
         float xStep = 0.00162;
         float yStep = xStep * aspect;
-        float hor = edgeStrengthWithDelta(coords, vec2(xStep, 0.0));
-        float ver = edgeStrengthWithDelta(coords, vec2(0.0, yStep));
+        float hor = mashEdgeDelta(coords, vec2(xStep, 0.0));
+        float ver = mashEdgeDelta(coords, vec2(0.0, yStep));
         return (abs(hor) + abs(ver)) * 0.2;
       }
       void main() {
         vec4 tex = texture2D(uSampler, vTexCoord);
         vec3 outRgb = (tex.r + tex.g + tex.b) * vec3(0.333);
-        float edge = edgeStrength(vTexCoord) * p0 * 5.5;
+        float edge = mashEdgeStrength(vTexCoord) * p0 * 5.5;
         float x = p1 == 1.0 ? 0.04 : 0.11;
         outRgb *= 1.0 - smoothstep(x, 0.1, edge);
         if (outRgb != vec3(0.0)) { outRgb = vec3(1.0); }
@@ -141,9 +143,9 @@ export const FILTERS: FilterDef[] = [
         return linearToDisplay(vec3(fromHsvHelper(5.0, hsv), fromHsvHelper(3.0, hsv), fromHsvHelper(1.0, hsv)));
       }
       float quantize(float v, float levels) { return floor(v * levels) / levels; }
-      float edgeStrength(vec2 coords) {
-        float hor = edgeStrengthWithDelta(coords, vec2(uInvWidth * 1.75, 0.0));
-        float ver = edgeStrengthWithDelta(coords, vec2(0.0, uInvHeight * 1.75));
+      float mashEdgeStrength(vec2 coords) {
+        float hor = mashEdgeDelta(coords, vec2(uInvWidth * 1.75, 0.0));
+        float ver = mashEdgeDelta(coords, vec2(0.0, uInvHeight * 1.75));
         return (abs(hor) + abs(ver)) * 0.5;
       }
       void main() {
@@ -152,7 +154,7 @@ export const FILTERS: FilterDef[] = [
         hsv.y = quantize(hsv.y, p1 * 1.33);
         hsv.z = quantize(hsv.z, p2);
         vec3 outRgb = fromHsv(hsv);
-        outRgb *= 1.0 - smoothstep(0.04, 0.1, edgeStrength(vTexCoord) * p0);
+        outRgb *= 1.0 - smoothstep(0.04, 0.1, mashEdgeStrength(vTexCoord) * p0);
         gl_FragColor = vec4(outRgb, 1.0);
       }`,
   },
@@ -197,12 +199,12 @@ export const FILTERS: FilterDef[] = [
     // which costs more per pixel but keeps the preview a single draw.
     fragment: `
       ${LUMINANCE}
-      vec2 edgeDirection(vec2 coords) {
-        float hor = edgeStrengthWithDelta(coords, vec2(0.001, 0.0));
-        float ver = edgeStrengthWithDelta(coords, vec2(0.0, 0.001));
+      vec2 mashEdgeDirection(vec2 coords) {
+        float hor = mashEdgeDelta(coords, vec2(0.001, 0.0));
+        float ver = mashEdgeDelta(coords, vec2(0.0, 0.001));
         return vec2(ver, -hor);
       }
-      vec3 dirBlur(vec2 coords, vec2 direction) {
+      vec3 mashDirBlur(vec2 coords, vec2 direction) {
         vec3 outC = vec3(0.0);
         const int radius = 12;
         float weightSum = 0.0;
@@ -221,14 +223,14 @@ export const FILTERS: FilterDef[] = [
         for (int x = -rad; x <= rad; x += 2) {
           for (int y = -rad; y <= rad; y += 2) {
             vec2 at = vTexCoord + vec2(float(x), float(y)) * (0.002 * p0);
-            vec2 edge = edgeDirection(at);
+            vec2 edge = mashEdgeDirection(at);
             float weight = 1.0 - sqrt(float(x*x + y*y)) / sqrt(float(rad*rad + rad*rad + 1));
             aggregate += edge * weight;
             weightSum += weight;
           }
         }
         aggregate /= weightSum;
-        gl_FragColor = vec4(dirBlur(vTexCoord, aggregate * p1 * 0.1), 1.0);
+        gl_FragColor = vec4(mashDirBlur(vTexCoord, aggregate * p1 * 0.1), 1.0);
       }`,
   },
 ];

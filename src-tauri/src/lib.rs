@@ -103,7 +103,8 @@ fn start_export(
     handle: State<'_, ExportHandle>,
     clips: Vec<ExportClip>,
     cards: Vec<ExportCard>,
-    filters: Vec<FilterSpec>,
+    // One filter chain per clip, in the same order as `clips`.
+    filters: Vec<Vec<FilterSpec>>,
     settings: ExportSettings,
 ) -> Result<(), String> {
     if handle.is_running() {
@@ -117,7 +118,8 @@ fn start_export(
     ));
     // With filters the work is split across two ffmpeg processes with the GPU
     // in between; without them one process does everything, as before.
-    let filtered = if filters.is_empty() {
+    let any_filters = filters.iter().any(|c| !c.is_empty());
+    let filtered = if !any_filters {
         None
     } else {
         Some(pipeline::build(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?)
@@ -137,10 +139,10 @@ fn start_export(
                     .join(" ")
             };
             format!(
-                "# audio\n{}\n\n# decode -> GPU filters -> encode\n{} | <{} filter(s) on the GPU> | {}",
+                "# audio\n{}\n\n# decode -> GPU filters -> encode\n{} | <filters on the GPU, {} clip(s)> | {}",
                 show(&f.audio_args),
                 show(&f.decode_args),
-                filters.len(),
+                filters.iter().filter(|c| !c.is_empty()).count(),
                 show(&f.encode_args)
             )
         }

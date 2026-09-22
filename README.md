@@ -26,10 +26,11 @@ decode/encode step.
   While a card is selected and playback is paused it is drawn at full opacity
   so it can be positioned even when the playhead sits inside one of its fades;
   playback shows the real opacity, and the panel reports it.
-- **Filters**: the eight image filters from
+- **Filters (per clip)**: the image filters from
   [360mash](https://www.bigvideo.aau.dk/) — Grayscale, Pixelate, News Print,
   Charcoal, Cartoon, Monet and Painting — running the same shader maths, with
-  a live preview. 360mash encodes with libav compiled to WebAssembly; here the
+  a live preview. Each clip carries its own chain, with "Apply to all clips"
+  when you want the lot. 360mash encodes with libav compiled to WebAssembly; here the
   shaders run on the GPU through wgpu while ffmpeg keeps the decoding and the
   hardware encoding. Measured on an M4 Max at 4K: 1.33x realtime for
   Grayscale, 1.05x for Monet, 0.95x for Painting.
@@ -114,7 +115,9 @@ filter graph. With filters active the export splits in three:
    stdout. RGBA rather than yuv420p so the filters see full chroma.
 3. Each frame goes through the GPU, then into a second ffmpeg that draws the
    text cards on top — so captions are never filtered — and encodes with
-   VideoToolbox.
+   VideoToolbox. Frames arrive as one concatenated stream, so a frame's clip
+   is worked out from its index and that clip's chain is used; a clip with no
+   filters skips the GPU entirely.
 
 The shaders are ported to WGSL in `src-tauri/src/shaders/`; the preview uses
 360mash's original GLSL unchanged, since the preview is WebGL too.
@@ -124,7 +127,7 @@ The shaders are ported to WGSL in `src-tauri/src/shaders/`; the preview uses
 - Preview decodes the source file in the webview; 8K HEVC may stutter.
   Planned: generate 2K proxies with ffmpeg for editing.
 - Cuts only; no transitions yet.
-- Filters apply to the whole timeline, not per clip, and cannot be keyframed.
+- Filter settings are fixed for a clip; they cannot be keyframed.
 - The filtered export is dominated by moving 4K frames through pipes rather
   than by the shaders. Keeping frames on the GPU, or using rgb24 instead of
   rgba, would be the place to look for more speed.
