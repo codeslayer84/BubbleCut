@@ -1,7 +1,10 @@
 mod ffmpeg;
+mod gpufilters;
+mod pipeline;
 mod spherical;
 
 use ffmpeg::{ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode};
+use gpufilters::FilterSpec;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
@@ -100,9 +103,10 @@ fn start_export(
     handle: State<'_, ExportHandle>,
     clips: Vec<ExportClip>,
     cards: Vec<ExportCard>,
+    filters: Vec<FilterSpec>,
     settings: ExportSettings,
 ) -> Result<(), String> {
-    if handle.0.lock().unwrap().is_some() {
+    if handle.is_running() {
         return Err("an export is already running".into());
     }
     let output = PathBuf::from(&settings.output);
@@ -111,21 +115,54 @@ fn start_export(
         output.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default(),
         uuid::Uuid::new_v4().simple()
     ));
+    // With filters the work is split across two ffmpeg processes with the GPU
+    // in between; without them one process does everything, as before.
+    let filtered = if filters.is_empty() {
+        None
+    } else {
+        Some(pipeline::build(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?)
+    };
     let plan = ffmpeg::build_plan(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?;
     let handle = handle.inner().clone();
-    let command = std::iter::once("ffmpeg".to_string())
-        .chain(plan.args.iter().map(|a| shell_quote(a)))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let command = match &filtered {
+        None => std::iter::once("ffmpeg".to_string())
+            .chain(plan.args.iter().map(|a| shell_quote(a)))
+            .collect::<Vec<_>>()
+            .join(" "),
+        Some(f) => {
+            let show = |args: &[String]| {
+                std::iter::once("ffmpeg".to_string())
+                    .chain(args.iter().map(|a| shell_quote(a)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            format!(
+                "# audio\n{}\n\n# decode -> GPU filters -> encode\n{} | <{} filter(s) on the GPU> | {}",
+                show(&f.audio_args),
+                show(&f.decode_args),
+                filters.len(),
+                show(&f.encode_args)
+            )
+        }
+    };
 
-    let plan_temps = plan.temp_files.clone();
+    let mut plan_temps = plan.temp_files.clone();
+    if let Some(f) = &filtered {
+        plan_temps.extend(f.temp_files.iter().cloned());
+    }
     std::thread::spawn(move || {
         let result = (|| -> Result<ExportDone, String> {
             let app2 = app.clone();
-            ffmpeg::run(&plan, &handle, move |p| {
-                let _ = app2.emit("export:progress", p);
-            })
-            .map_err(|e| e.to_string())?;
+            match &filtered {
+                Some(f) => pipeline::run(f, &filters, &handle, move |p| {
+                    let _ = app2.emit("export:progress", p);
+                })
+                .map_err(|e| e.to_string())?,
+                None => ffmpeg::run(&plan, &handle, move |p| {
+                    let _ = app2.emit("export:progress", p);
+                })
+                .map_err(|e| e.to_string())?,
+            }
 
             let (inject, boxes) = if settings.inject_spherical {
                 let _ = app.emit(
@@ -174,6 +211,21 @@ fn start_export(
 }
 
 #[tauri::command]
+fn list_filters() -> Vec<serde_json::Value> {
+    gpufilters::available_filters()
+        .into_iter()
+        .map(|name| {
+            let params: Vec<serde_json::Value> = gpufilters::filter_params(&name)
+                .unwrap_or(&[])
+                .iter()
+                .map(|(key, _, default)| serde_json::json!({ "key": key, "default": default }))
+                .collect();
+            serde_json::json!({ "name": name, "params": params })
+        })
+        .collect()
+}
+
+#[tauri::command]
 fn cancel_export(handle: State<'_, ExportHandle>) -> bool {
     handle.cancel()
 }
@@ -213,6 +265,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ffmpeg_info,
             probe_media,
+            list_filters,
             start_export,
             cancel_export,
             tag_spherical,

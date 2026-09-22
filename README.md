@@ -26,6 +26,13 @@ decode/encode step.
   While a card is selected and playback is paused it is drawn at full opacity
   so it can be positioned even when the playhead sits inside one of its fades;
   playback shows the real opacity, and the panel reports it.
+- **Filters**: the eight image filters from
+  [360mash](https://www.bigvideo.aau.dk/) — Grayscale, Pixelate, News Print,
+  Charcoal, Cartoon, Monet and Painting — running the same shader maths, with
+  a live preview. 360mash encodes with libav compiled to WebAssembly; here the
+  shaders run on the GPU through wgpu while ffmpeg keeps the decoding and the
+  hardware encoding. Measured on an M4 Max at 4K: 1.33x realtime for
+  Grayscale, 1.05x for Monet, 0.95x for Painting.
 - **Export**: single ffmpeg run (trim → `v360` → concat → encode), hardware
   HEVC/H.264 via VideoToolbox, presets for YouTube VR / Quest / Vision Pro,
   live progress + ETA, cancel.
@@ -94,11 +101,33 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
 5. `spherical::check` + `ffprobe` confirm the result; the ffmpeg command is
    shown in the UI so you can reproduce it by hand.
 
+## How filters are applied
+
+This ffmpeg has no libplacebo, OpenCL or Vulkan, so GLSL cannot run inside its
+filter graph. With filters active the export splits in three:
+
+1. An audio-only pass writes the joined audio to a temporary WAV. It has to
+   finish first: if it shared a process with the video, the encoder would wait
+   on a half-written file while the decoder waited for its video pipe to
+   drain, and the two would deadlock.
+2. ffmpeg trims, reorients and joins the clips, emitting raw RGBA frames on
+   stdout. RGBA rather than yuv420p so the filters see full chroma.
+3. Each frame goes through the GPU, then into a second ffmpeg that draws the
+   text cards on top — so captions are never filtered — and encodes with
+   VideoToolbox.
+
+The shaders are ported to WGSL in `src-tauri/src/shaders/`; the preview uses
+360mash's original GLSL unchanged, since the preview is WebGL too.
+
 ## Known limitations / next steps
 
 - Preview decodes the source file in the webview; 8K HEVC may stutter.
   Planned: generate 2K proxies with ffmpeg for editing.
 - Cuts only; no transitions yet.
+- Filters apply to the whole timeline, not per clip, and cannot be keyframed.
+- The filtered export is dominated by moving 4K frames through pipes rather
+  than by the shaders. Keeping frames on the GPU, or using rgb24 instead of
+  rgba, would be the place to look for more speed.
 - Text cards do not move: they fade in and out, but cannot be animated along a
   path or keyframed.
 - Spatial (ambisonic) audio passes through as plain multichannel AAC — no

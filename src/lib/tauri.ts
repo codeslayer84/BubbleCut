@@ -13,6 +13,7 @@ import type {
   MediaInfo,
   Progress,
   SphericalCheck,
+  FilterInstance,
   StereoMode,
   TextCard,
 } from "./types";
@@ -47,6 +48,7 @@ export function startExport(
   clips: Clip[],
   media: Record<string, MediaInfo>,
   cards: TextCard[],
+  filters: FilterInstance[],
   settings: ExportSettings,
 ) {
   const exportClips = clips.map((c) => {
@@ -85,7 +87,13 @@ export function startExport(
         fadeOut: c.fadeOut,
       };
     });
-  return invoke<void>("start_export", { clips: exportClips, cards: exportCards, settings });
+  const exportFilters = filters.map((f) => ({ name: f.name, params: f.params }));
+  return invoke<void>("start_export", {
+    clips: exportClips,
+    cards: exportCards,
+    filters: exportFilters,
+    settings,
+  });
 }
 
 export function onExportEvents(handlers: {

@@ -417,20 +417,63 @@ fn fmt(f: f64) -> String {
     format!("{:.6}", f)
 }
 
-/// Build the ffmpeg argument list for a sequence of clips.
-pub fn build_plan(
-    clips: &[ExportClip],
-    cards: &[ExportCard],
-    s: &ExportSettings,
-    tmp_output: &Path,
-) -> Result<ExportPlan, FfError> {
-    if clips.is_empty() {
-        return Err(FfError::Other("timeline is empty".into()));
-    }
-    let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
 
-    // Inputs. `-ss` before `-i` seeks fast on the demuxer; we then trim
-    // precisely in the filter graph relative to the seeked position.
+/// The per-clip video chain: trim, optional reorientation, resize, frame rate.
+/// `out_format` is the pixel format the chain ends in, which differs between
+/// the encode path (yuv420p) and the GPU path (rgba, to keep full chroma).
+fn clip_video_chain(i: usize, c: &ExportClip, s: &ExportSettings, out_format: &str) -> String {
+    let len = (c.out_point - c.in_point).max(0.0);
+    let mut v = vec![format!("[{i}:v]trim=end={},setpts=PTS-STARTPTS", fmt(len))];
+    if c.yaw != 0.0 || c.pitch != 0.0 || c.roll != 0.0 || c.stereo_mode != s.stereo_mode {
+        v.push(format!(
+            "v360=input=e:output=e:in_stereo={}:out_stereo={}:yaw={}:pitch={}:roll={}:interp=cubic",
+            stereo_arg(&c.stereo_mode),
+            stereo_arg(&s.stereo_mode),
+            c.yaw,
+            c.pitch,
+            c.roll
+        ));
+    }
+    if s.width > 0 && s.height > 0 {
+        v.push(format!("scale={}:{}:flags=lanczos", s.width, s.height));
+    }
+    if s.fps > 0.0 {
+        v.push(format!("fps={}", s.fps));
+    }
+    v.push(format!("format={out_format}"));
+    format!("{}[v{i}]", v.join(","))
+}
+
+/// A video-only pass that ends in raw RGBA frames on stdout, for the GPU.
+pub fn build_video_decode_args(clips: &[ExportClip], s: &ExportSettings) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
+    for c in clips {
+        args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
+    }
+
+    let mut graph: Vec<String> = Vec::new();
+    let mut labels = String::new();
+    for (i, c) in clips.iter().enumerate() {
+        graph.push(clip_video_chain(i, c, s, "rgba"));
+        labels.push_str(&format!("[v{i}]"));
+    }
+    graph.push(format!("{labels}concat=n={}:v=1:a=0[vcat]", clips.len()));
+
+    args.extend(["-filter_complex".into(), graph.join(";")]);
+    args.extend([
+        "-map".into(), "[vcat]".into(),
+        "-an".into(),
+        "-f".into(), "rawvideo".into(),
+        "-pix_fmt".into(), "rgba".into(),
+        "-".into(),
+    ]);
+    args
+}
+
+/// An audio-only pass over the same clips. Used by the filtered export, where
+/// the audio has to be finished on disk before the encoder opens it.
+pub fn build_audio_args(clips: &[ExportClip], out: &Path) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
     for c in clips {
         args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
     }
@@ -438,17 +481,33 @@ pub fn build_plan(
     let any_silent = clips.iter().any(|c| !c.has_audio);
     if any_silent {
         args.extend([
-            "-f".into(),
-            "lavfi".into(),
-            "-i".into(),
+            "-f".into(), "lavfi".into(), "-i".into(),
             "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
         ]);
     }
 
-    // Card PNGs become extra inputs. A single still frame is enough: overlay
-    // repeats it (eof_action=repeat) for as long as the main stream runs.
-    let card_idx0 = clips.len() + if any_silent { 1 } else { 0 };
-    let mut temp_files: Vec<PathBuf> = Vec::new();
+    let mut graph: Vec<String> = Vec::new();
+    let mut labels = String::new();
+    for (i, c) in clips.iter().enumerate() {
+        let len = (c.out_point - c.in_point).max(0.0);
+        let src = if c.has_audio { i } else { silence_idx };
+        graph.push(format!(
+            "[{src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000[a{i}]",
+            fmt(len)
+        ));
+        labels.push_str(&format!("[a{i}]"));
+    }
+    graph.push(format!("{labels}concat=n={}:v=0:a=1[aout]", clips.len()));
+
+    args.extend(["-filter_complex".into(), graph.join(";")]);
+    args.extend(["-map".into(), "[aout]".into(), "-c:a".into(), "pcm_s16le".into()]);
+    args.push(out.to_string_lossy().into_owned());
+    args
+}
+
+/// Writes each card's PNG next to the output so ffmpeg can read it.
+pub fn write_card_pngs(cards: &[ExportCard], tmp_output: &Path) -> Result<Vec<PathBuf>, FfError> {
+    let mut files = Vec::new();
     for (i, card) in cards.iter().enumerate() {
         let png = tmp_output.with_file_name(format!(
             ".{}.card{}.png",
@@ -458,63 +517,37 @@ pub fn build_plan(
         let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &card.png_base64)
             .map_err(|e| FfError::Other(format!("card {i}: bad PNG data: {e}")))?;
         std::fs::write(&png, bytes)?;
-        args.extend(["-i".into(), png.to_string_lossy().into_owned()]);
-        temp_files.push(png);
+        files.push(png);
     }
+    Ok(files)
+}
 
+/// The card half of the filter graph, shared by the plain and the filtered
+/// export so the two cannot drift apart. Returns the graph parts and the
+/// label carrying the result.
+pub fn card_graph_parts(
+    cards: &[ExportCard],
+    s: &ExportSettings,
+    out_w: u32,
+    out_h: u32,
+    first_input_index: usize,
+    start_label: &str,
+    fps: f64,
+) -> (Vec<String>, String) {
     let mut graph: Vec<String> = Vec::new();
-    let mut concat_inputs = String::new();
-    let mut total = 0.0;
-    for (i, c) in clips.iter().enumerate() {
-        let len = (c.out_point - c.in_point).max(0.0);
-        total += len;
-
-        let mut v = vec![format!("[{i}:v]trim=end={},setpts=PTS-STARTPTS", fmt(len))];
-        if c.yaw != 0.0 || c.pitch != 0.0 || c.roll != 0.0 || c.stereo_mode != s.stereo_mode {
-            v.push(format!(
-                "v360=input=e:output=e:in_stereo={}:out_stereo={}:yaw={}:pitch={}:roll={}:interp=cubic",
-                stereo_arg(&c.stereo_mode),
-                stereo_arg(&s.stereo_mode),
-                c.yaw,
-                c.pitch,
-                c.roll
-            ));
-        }
-        if s.width > 0 && s.height > 0 {
-            v.push(format!("scale={}:{}:flags=lanczos", s.width, s.height));
-        }
-        if s.fps > 0.0 {
-            v.push(format!("fps={}", s.fps));
-        }
-        v.push("format=yuv420p".into());
-        graph.push(format!("{}[v{i}]", v.join(",")));
-
-        let a_src = if c.has_audio { i } else { silence_idx };
-        graph.push(format!(
-            "[{a_src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000[a{i}]",
-            fmt(len)
-        ));
-        concat_inputs.push_str(&format!("[v{i}][a{i}]"));
-    }
-    graph.push(format!(
-        "{concat_inputs}concat=n={}:v=1:a=1[vcat][aout]",
-        clips.len()
-    ));
-
     // Text cards: project each flat card onto the sphere and overlay it.
     //
     // v360 discards the input alpha channel, so the alpha plane is extracted
     // and projected separately with identical parameters, then merged back.
     // v360's rotations are the opposite sign to ours, hence the negation.
-    let (out_w, out_h) = output_size(clips, s);
     let (eye_w, eye_h) = match s.stereo_mode {
         StereoMode::Mono => (out_w, out_h),
         StereoMode::TopBottom => (out_w, out_h / 2),
         StereoMode::LeftRight => (out_w / 2, out_h),
     };
-    let mut last = "vcat".to_string();
+    let mut last = start_label.to_string();
     for (i, card) in cards.iter().enumerate() {
-        let idx = card_idx0 + i;
+        let idx = first_input_index + i;
         let v360 = format!(
             "v360=flat:e:ih_fov={:.4}:iv_fov={:.4}:yaw={:.4}:pitch={:.4}:roll={:.4}:w={}:h={}:interp=cubic",
             card.width_deg,
@@ -534,7 +567,7 @@ pub fn build_plan(
         // animate. Rather than re-projecting every frame (costly at 8K), the
         // projection is done once and the frame replicated, then faded.
         let faded = if card.fade_in > 0.0 || card.fade_out > 0.0 {
-            let rate = if s.fps > 0.0 { s.fps } else { clips[0].fps.max(1.0) };
+            let rate = fps;
             let mut chain = format!("loop=loop=-1:size=1,setpts=N/({rate:.4}*TB)");
             if card.fade_in > 0.0 {
                 chain.push_str(&format!(
@@ -575,7 +608,85 @@ pub fn build_plan(
         ));
         last = next;
     }
-    graph.push(format!("[{last}]format=yuv420p[vout]"));
+
+
+    (graph, last)
+}
+
+/// Build the ffmpeg argument list for a sequence of clips.
+/// Video size the decode stage emits, which the GPU and encoder must agree on.
+pub fn frame_size(clips: &[ExportClip], s: &ExportSettings) -> (u32, u32) {
+    output_size(clips, s)
+}
+
+/// Frame rate of the exported video.
+pub fn frame_rate(clips: &[ExportClip], s: &ExportSettings) -> f64 {
+    if s.fps > 0.0 { s.fps } else { clips.first().map(|c| c.fps).unwrap_or(30.0).max(1.0) }
+}
+
+pub fn build_plan(
+    clips: &[ExportClip],
+    cards: &[ExportCard],
+    s: &ExportSettings,
+    tmp_output: &Path,
+) -> Result<ExportPlan, FfError> {
+    if clips.is_empty() {
+        return Err(FfError::Other("timeline is empty".into()));
+    }
+    let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
+
+    // Inputs. `-ss` before `-i` seeks fast on the demuxer; we then trim
+    // precisely in the filter graph relative to the seeked position.
+    for c in clips {
+        args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
+    }
+    let silence_idx = clips.len();
+    let any_silent = clips.iter().any(|c| !c.has_audio);
+    if any_silent {
+        args.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "anullsrc=channel_layout=stereo:sample_rate=48000".into(),
+        ]);
+    }
+
+    // Card PNGs become extra inputs. A single still frame is enough: overlay
+    // repeats it (eof_action=repeat) for as long as the main stream runs.
+    let card_idx0 = clips.len() + if any_silent { 1 } else { 0 };
+    let temp_files = write_card_pngs(cards, tmp_output)?;
+    for png in &temp_files {
+        args.extend(["-i".into(), png.to_string_lossy().into_owned()]);
+    }
+
+    let mut graph: Vec<String> = Vec::new();
+    let mut concat_inputs = String::new();
+    let mut total = 0.0;
+    for (i, c) in clips.iter().enumerate() {
+        let len = (c.out_point - c.in_point).max(0.0);
+        total += len;
+
+        graph.push(clip_video_chain(i, c, s, "yuv420p"));
+
+        let a_src = if c.has_audio { i } else { silence_idx };
+        graph.push(format!(
+            "[{a_src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000[a{i}]",
+            fmt(len)
+        ));
+        concat_inputs.push_str(&format!("[v{i}][a{i}]"));
+    }
+    graph.push(format!(
+        "{concat_inputs}concat=n={}:v=1:a=1[vcat][aout]",
+        clips.len()
+    ));
+
+    // Text cards are drawn on top of the joined video.
+    let (out_w, out_h) = output_size(clips, s);
+    let rate = frame_rate(clips, s);
+    let (card_parts, last_label) =
+        card_graph_parts(cards, s, out_w, out_h, card_idx0, "vcat", rate);
+    graph.extend(card_parts);
+    graph.push(format!("[{last_label}]format=yuv420p[vout]"));
 
     args.extend(["-filter_complex".into(), graph.join(";")]);
     args.extend(["-map".into(), "[vout]".into(), "-map".into(), "[aout]".into()]);
@@ -646,17 +757,27 @@ pub struct Progress {
     pub stage: String,
 }
 
-/// Handle to the running ffmpeg child, so the UI can cancel.
+/// Handles to the running ffmpeg children, so the UI can cancel. A filtered
+/// export runs two of them with the GPU in between.
 #[derive(Default, Clone)]
-pub struct ExportHandle(pub Arc<Mutex<Option<Child>>>);
+pub struct ExportHandle(pub Arc<Mutex<Vec<Child>>>);
 
 impl ExportHandle {
     pub fn cancel(&self) -> bool {
-        if let Some(child) = self.0.lock().unwrap().as_mut() {
+        let mut children = self.0.lock().unwrap();
+        let running = !children.is_empty();
+        for child in children.iter_mut() {
             let _ = child.kill();
-            return true;
         }
-        false
+        running
+    }
+
+    pub fn is_running(&self) -> bool {
+        !self.0.lock().unwrap().is_empty()
+    }
+
+    pub fn take_all(&self) -> Vec<Child> {
+        std::mem::take(&mut *self.0.lock().unwrap())
     }
 }
 
@@ -676,7 +797,7 @@ pub fn run(
 
     let stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
-    *handle.0.lock().unwrap() = Some(child);
+    handle.0.lock().unwrap().push(child);
 
     // Drain stderr on its own thread so ffmpeg never blocks on a full pipe.
     let log = Arc::new(Mutex::new(String::new()));
@@ -718,8 +839,8 @@ pub fn run(
     }
 
     let status = {
-        let mut guard = handle.0.lock().unwrap();
-        let mut child = guard.take().unwrap();
+        let mut children = handle.take_all();
+        let mut child = children.pop().unwrap();
         child.wait()?
     };
     let _ = stderr_thread.join();

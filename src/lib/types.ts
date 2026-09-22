@@ -56,6 +56,13 @@ export interface TextCard {
   shadow: boolean;
 }
 
+/** One filter in the chain, with its parameter values. */
+export interface FilterInstance {
+  id: string;
+  name: string;
+  params: Record<string, number>;
+}
+
 export interface ExportSettings {
   output: string;
   encoder: string;
@@ -112,5 +119,6 @@ export interface ProjectFile {
   media: MediaInfo[];
   clips: Clip[];
   cards?: TextCard[];
+  filters?: FilterInstance[];
   exportSettings: Partial<ExportSettings>;
 }

@@ -5,13 +5,14 @@ import { Inspector } from "./components/Inspector";
 import { MediaBin } from "./components/MediaBin";
 import { ExportPanel } from "./components/ExportPanel";
 import { CardPanel } from "./components/CardPanel";
+import { FilterPanel } from "./components/FilterPanel";
 import { TagTool } from "./components/TagTool";
 import { clipAt, toProjectFile, useStore } from "./lib/store";
 import { isTauri, pickOpenPath, pickSavePath, readTextFile, writeTextFile } from "./lib/tauri";
 import type { ProjectFile } from "./lib/types";
 import "./app.css";
 
-type Tab = "edit" | "text" | "export" | "tools";
+type Tab = "edit" | "text" | "filters" | "export" | "tools";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("edit");
@@ -66,9 +67,10 @@ export default function App() {
       <header>
         <div className="brand">360 Editor</div>
         <nav>
-          {(["edit", "text", "export", "tools"] as Tab[]).map((t) => (
+          {(["edit", "text", "filters", "export", "tools"] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-              {t === "edit" ? "Edit" : t === "text" ? "Text" : t === "export" ? "Export" : "Tools"}
+              {t === "edit" ? "Edit" : t === "text" ? "Text" : t === "filters" ? "Filters"
+                : t === "export" ? "Export" : "Tools"}
             </button>
           ))}
         </nav>
@@ -95,6 +97,7 @@ export default function App() {
         <aside className="right">
           {tab === "edit" && <Inspector />}
           {tab === "text" && <CardPanel />}
+          {tab === "filters" && <FilterPanel />}
           {tab === "export" && <ExportPanel />}
           {tab === "tools" && <TagTool />}
         </aside>

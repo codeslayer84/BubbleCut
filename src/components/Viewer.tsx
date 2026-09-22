@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { clipAt, clipLength, useStore } from "../lib/store";
 import { cameraQuaternion, cardQuaternion, clipQuaternion } from "../lib/orientation";
 import { cardOpacity, renderCard } from "../lib/cardRender";
+import { FilterChain } from "../lib/filterChain";
 import { mediaUrl } from "../lib/tauri";
 import type { MediaInfo, TextCard } from "../lib/types";
 
@@ -49,6 +50,7 @@ export function Viewer() {
     material: THREE.MeshBasicMaterial;
   } | null>(null);
   const loadedPath = useRef<string | null>(null);
+  const chainRef = useRef<FilterChain | null>(null);
   const cardGroupRef = useRef<THREE.Group | null>(null);
   const cardMeshes = useRef<CardMesh[]>([]);
   const tmpQ = new THREE.Quaternion();
@@ -82,6 +84,8 @@ export function Viewer() {
     sphere.rotation.y = -Math.PI / 2; // equirect centre → -Z
     scene.add(sphere);
 
+    const chain = new FilterChain(renderer);
+    chainRef.current = chain;
     threeRef.current = { renderer, camera, scene, texture, material };
 
     const resize = () => {
@@ -100,6 +104,21 @@ export function Viewer() {
       raf = requestAnimationFrame(loop);
       const { view, clips, playhead } = useStore.getState();
       const at = clipAt(clips, playhead);
+
+      // Filters run on the equirectangular frame, before it is wrapped onto
+      // the sphere, which is where the exporter applies them as well.
+      const { filters, previewFilters, media } = useStore.getState();
+      const active = previewFilters ? filters : [];
+      chain.setChain(active);
+      const m = at ? media[at.clip.mediaPath] : undefined;
+      const filtered = active.length && m
+        ? chain.render(texture, m.width, m.height, active)
+        : texture;
+      if (material.map !== filtered) {
+        material.map = filtered;
+        material.needsUpdate = true;
+      }
+
       camera.quaternion.copy(cameraQuaternion(at?.clip ?? null, view));
 
       // Cards live in the exported video's frame, so they ride along with the
@@ -132,6 +151,7 @@ export function Viewer() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      chain.dispose();
       geometry.dispose();
       material.dispose();
       texture.dispose();

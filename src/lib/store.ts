@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
+import type { Clip, ExportSettings, FilterInstance, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -50,6 +50,9 @@ interface State {
   media: Record<string, MediaInfo>;
   clips: Clip[];
   cards: TextCard[];
+  /** Image filters applied to the whole timeline, in order. */
+  filters: FilterInstance[];
+  previewFilters: boolean;
   selectedClipId: string | null;
   selectedCardId: string | null;
   playhead: number;
@@ -62,6 +65,11 @@ interface State {
   addMedia: (m: MediaInfo, appendToTimeline?: boolean) => void;
   removeMedia: (path: string) => void;
   appendClip: (mediaPath: string) => void;
+  addFilter: (name: string, params: Record<string, number>) => void;
+  updateFilter: (id: string, params: Record<string, number>) => void;
+  removeFilter: (id: string) => void;
+  moveFilter: (id: string, dir: -1 | 1) => void;
+  setPreviewFilters: (on: boolean) => void;
   addCard: (card: TextCard) => void;
   updateCard: (id: string, patch: Partial<TextCard>) => void;
   removeCard: (id: string) => void;
@@ -84,6 +92,8 @@ export const useStore = create<State>((set, get) => ({
   media: {},
   clips: [],
   cards: [],
+  filters: [],
+  previewFilters: true,
   selectedClipId: null,
   selectedCardId: null,
   playhead: 0,
@@ -125,6 +135,27 @@ export const useStore = create<State>((set, get) => ({
         dirty: true,
       };
     }),
+  addFilter: (name, params) =>
+    set((s) => ({
+      filters: [...s.filters, { id: Math.random().toString(36).slice(2, 10), name, params }],
+      dirty: true,
+    })),
+  updateFilter: (id, params) =>
+    set((s) => ({
+      filters: s.filters.map((f) => (f.id === id ? { ...f, params: { ...f.params, ...params } } : f)),
+      dirty: true,
+    })),
+  removeFilter: (id) => set((s) => ({ filters: s.filters.filter((f) => f.id !== id), dirty: true })),
+  moveFilter: (id, dir) =>
+    set((s) => {
+      const i = s.filters.findIndex((f) => f.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= s.filters.length) return {};
+      const filters = [...s.filters];
+      [filters[i], filters[j]] = [filters[j], filters[i]];
+      return { filters, dirty: true };
+    }),
+  setPreviewFilters: (previewFilters) => set({ previewFilters }),
   addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
   updateCard: (id, patch) =>
     set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)), dirty: true })),
@@ -187,6 +218,7 @@ export const useStore = create<State>((set, get) => ({
       clips: p.clips,
       // Older projects predate fades, so the fields may be missing at runtime.
       cards: (p.cards ?? []).map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
+      filters: p.filters ?? [],
       selectedClipId: p.clips[0]?.id ?? null,
       selectedCardId: null,
       playhead: 0,
@@ -201,6 +233,7 @@ export const useStore = create<State>((set, get) => ({
       media: {},
       clips: [],
       cards: [],
+      filters: [],
       selectedClipId: null,
       selectedCardId: null,
       playhead: 0,
@@ -257,6 +290,7 @@ export function toProjectFile(s: State): ProjectFile {
     media: Object.values(s.media).map(({ blobUrl: _b, ...m }) => m),
     clips: s.clips,
     cards: s.cards,
+    filters: s.filters,
     exportSettings: s.exportSettings,
   };
 }

@@ -105,3 +105,6 @@ aside.right { border-left: 1px solid var(--border); }
 .warn { background: #3a3218; border: 1px solid #6b5a2b; border-radius: 6px; padding: 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
 .warn b { color: #f0c674; }
 .warn pre { margin: 0; }
+
+.filter-item { background: var(--panel-2); border-radius: 6px; padding: 8px; margin: 6px 0; }
+.filters .angle { grid-template-columns: 90px 1fr 58px 6px; }
