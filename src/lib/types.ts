@@ -42,6 +42,9 @@ export interface TextCard {
   roll: number;
   /** Horizontal angular size of the card, in degrees. */
   widthDeg: number;
+  /** Seconds to fade up at the start and down at the end. 0 = hard cut. */
+  fadeIn: number;
+  fadeOut: number;
   fontSize: number;
   bold: boolean;
   color: string;

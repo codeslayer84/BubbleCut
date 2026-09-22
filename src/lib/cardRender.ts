@@ -84,6 +84,17 @@ export function renderCard(card: TextCard): HTMLCanvasElement {
   return canvas;
 }
 
+/**
+ * Card opacity at a given timeline time, 0 outside its range.
+ * The exporter reproduces this with ffmpeg's `fade` filter.
+ */
+export function cardOpacity(card: TextCard, t: number): number {
+  if (t < card.start || t > card.end) return 0;
+  const up = card.fadeIn > 0 ? Math.min(1, (t - card.start) / card.fadeIn) : 1;
+  const down = card.fadeOut > 0 ? Math.min(1, (card.end - t) / card.fadeOut) : 1;
+  return Math.max(0, Math.min(1, up * down));
+}
+
 /** Vertical field of view (degrees) for a rectilinear card of this aspect. */
 export function verticalFov(horizontalFovDeg: number, width: number, height: number): number {
   const h = (horizontalFovDeg * Math.PI) / 180;

@@ -22,6 +22,7 @@ decode/encode step.
   and the exported PNG, so what you see is exactly what gets burned in.
   In export they are projected with `v360=flat:e` so they read as flat signs
   in a headset instead of being smeared across the equirectangular frame.
+  Each card can fade in and out.
 - **Export**: single ffmpeg run (trim → `v360` → concat → encode), hardware
   HEVC/H.264 via VideoToolbox, presets for YouTube VR / Quest / Vision Pro,
   live progress + ETA, cancel.
@@ -35,6 +36,10 @@ decode/encode step.
 ## Requirements
 
 - macOS (Linux/Windows should work but are untested)
+- A **native** `ffmpeg` + `ffprobe` (`brew install ffmpeg`). On Apple Silicon an
+  Intel-only build runs under Rosetta, loses the hardware video encoder and is
+  about 20x slower; the app prefers a native binary and warns if only an
+  emulated one is found.
 - `ffmpeg` + `ffprobe` on PATH, or in `/opt/homebrew/bin`, `/usr/local/bin`,
   or the directory named by `EDITOR360_FFMPEG_DIR`
 - Node 22 (`.nvmrc`), Rust stable
@@ -69,7 +74,10 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
    `concat`. Clips without audio get silence so concat stays aligned.
 2. Encode to a temp file next to the output (`hvc1` tag for HEVC, 2 s GOP,
    AAC audio, optional faststart).
-3. Text cards are projected onto the sphere and overlaid. `v360` drops the
+3. Text cards are projected onto the sphere and overlaid. A still image is a
+   single frame, which temporal filters cannot animate, so a fading card is
+   projected once and then replicated with `loop` before `fade` is applied —
+   re-projecting every frame would be far more expensive at 8K. `v360` drops the
    input alpha channel, so the card's alpha plane is extracted and projected
    separately with identical parameters, then recombined with `alphamerge`.
    `v360`'s rotations are the opposite sign to the editor's, so the angles are
@@ -84,7 +92,8 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
 - Preview decodes the source file in the webview; 8K HEVC may stutter.
   Planned: generate 2K proxies with ffmpeg for editing.
 - Cuts only; no transitions yet.
-- Text cards are static: no fades or animation, and no keyframed movement.
+- Text cards do not move: they fade in and out, but cannot be animated along a
+  path or keyframed.
 - Spatial (ambisonic) audio passes through as plain multichannel AAC — no
   `SA3D` box yet.
 - Reframe-to-flat (keyframed camera → 16:9) is not implemented.

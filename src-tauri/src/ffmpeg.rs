@@ -28,8 +28,20 @@ pub enum FfError {
     Other(String),
 }
 
+/// The host's CPU architecture, named the way Mach-O headers name it.
+pub fn host_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        other => other,
+    }
+}
+
 /// Locate an ffmpeg-family binary. GUI apps on macOS don't inherit the shell
 /// PATH, so we also look in the usual package-manager locations.
+///
+/// A binary that must run under emulation loses access to the hardware video
+/// encoders and is roughly 20x slower, so a native build always wins over an
+/// emulated one no matter where it sits on PATH.
 pub fn find_binary(name: &'static str) -> Result<PathBuf, FfError> {
     if let Ok(dir) = std::env::var("EDITOR360_FFMPEG_DIR") {
         let p = Path::new(&dir).join(name);
@@ -51,13 +63,22 @@ pub fn find_binary(name: &'static str) -> Result<PathBuf, FfError> {
     if let Some(home) = std::env::var_os("HOME") {
         dirs.push(Path::new(&home).join(".local/bin"));
     }
+
+    let mut first: Option<PathBuf> = None;
     for d in dirs {
         let p = d.join(name);
-        if p.is_file() {
+        if !p.is_file() {
+            continue;
+        }
+        let archs = binary_archs(&p);
+        // Unknown architecture (not a Mach-O, e.g. a shell wrapper) is taken
+        // at face value rather than skipped.
+        if archs.is_empty() || archs.iter().any(|a| a == host_arch()) {
             return Ok(p);
         }
+        first.get_or_insert(p);
     }
-    Err(FfError::NotFound(name))
+    first.ok_or(FfError::NotFound(name))
 }
 
 // ---------------------------------------------------------------- probing --
@@ -248,6 +269,42 @@ pub fn available_encoders() -> Result<Vec<String>, FfError> {
         .collect())
 }
 
+/// CPU architectures a Mach-O binary contains ("arm64", "x86_64").
+///
+/// An x86_64-only ffmpeg on an Apple Silicon Mac runs under Rosetta, where it
+/// cannot reach the hardware video encoders — the difference is dramatic, so
+/// it is worth telling the user about.
+pub fn binary_archs(path: &Path) -> Vec<String> {
+    let Ok(d) = std::fs::read(path) else { return vec![] };
+    if d.len() < 8 {
+        return vec![];
+    }
+    let name = |cputype: u32| match cputype {
+        0x0100_000c => Some("arm64".to_string()),
+        0x0100_0007 => Some("x86_64".to_string()),
+        _ => None,
+    };
+    let be32 = |o: usize| u32::from_be_bytes(d[o..o + 4].try_into().unwrap());
+    let le32 = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+
+    match be32(0) {
+        // Universal ("fat") binary: a table of per-architecture slices.
+        0xcafe_babe => {
+            let n = be32(4) as usize;
+            (0..n)
+                .filter_map(|i| {
+                    let o = 8 + i * 20;
+                    (o + 4 <= d.len()).then(|| name(be32(o))).flatten()
+                })
+                .collect()
+        }
+        _ => match le32(0) {
+            0xfeed_facf | 0xfeed_face => name(le32(4)).into_iter().collect(),
+            _ => vec![],
+        },
+    }
+}
+
 pub fn version() -> Result<String, FfError> {
     let ffmpeg = find_binary("ffmpeg")?;
     let out = Command::new(&ffmpeg).arg("-version").output()?;
@@ -275,6 +332,7 @@ pub struct ExportClip {
     pub stereo_mode: StereoMode,
     pub width: u32,
     pub height: u32,
+    pub fps: f64,
 }
 
 /// A text card burned into the exported video. The PNG is rendered by the UI
@@ -292,6 +350,9 @@ pub struct ExportCard {
     pub roll: f64,
     /// Horizontal angular size of the card in degrees.
     pub width_deg: f64,
+    /// Seconds to fade up / down. 0 means a hard cut.
+    pub fade_in: f64,
+    pub fade_out: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -469,15 +530,40 @@ pub fn build_plan(
         graph.push(format!("[cr{i}]format=rgb24,{v360},format=rgba[crp{i}]"));
         graph.push(format!("[crp{i}][cam{i}]alphamerge[card{i}]"));
         // Both eyes get the same card (zero disparity = at infinity).
+        // A still image is a single frame, which temporal filters cannot
+        // animate. Rather than re-projecting every frame (costly at 8K), the
+        // projection is done once and the frame replicated, then faded.
+        let faded = if card.fade_in > 0.0 || card.fade_out > 0.0 {
+            let rate = if s.fps > 0.0 { s.fps } else { clips[0].fps.max(1.0) };
+            let mut chain = format!("loop=loop=-1:size=1,setpts=N/({rate:.4}*TB)");
+            if card.fade_in > 0.0 {
+                chain.push_str(&format!(
+                    ",fade=t=in:st={:.4}:d={:.4}:alpha=1",
+                    card.start, card.fade_in
+                ));
+            }
+            if card.fade_out > 0.0 {
+                chain.push_str(&format!(
+                    ",fade=t=out:st={:.4}:d={:.4}:alpha=1",
+                    (card.end - card.fade_out).max(card.start),
+                    card.fade_out
+                ));
+            }
+            graph.push(format!("[card{i}]{chain}[cardt{i}]"));
+            format!("cardt{i}")
+        } else {
+            format!("card{i}")
+        };
+
         let card_label = match s.stereo_mode {
-            StereoMode::Mono => format!("card{i}"),
+            StereoMode::Mono => faded.clone(),
             StereoMode::TopBottom => {
-                graph.push(format!("[card{i}]split[c{i}a][c{i}b]"));
+                graph.push(format!("[{faded}]split[c{i}a][c{i}b]"));
                 graph.push(format!("[c{i}a][c{i}b]vstack[cardf{i}]"));
                 format!("cardf{i}")
             }
             StereoMode::LeftRight => {
-                graph.push(format!("[card{i}]split[c{i}a][c{i}b]"));
+                graph.push(format!("[{faded}]split[c{i}a][c{i}b]"));
                 graph.push(format!("[c{i}a][c{i}b]hstack[cardf{i}]"));
                 format!("cardf{i}")
             }
@@ -541,6 +627,9 @@ pub fn build_plan(
     if s.faststart {
         args.extend(["-movflags".into(), "+faststart".into()]);
     }
+    // Card streams are looped indefinitely for fades, so bound the output
+    // explicitly; without this ffmpeg would keep running past the last frame.
+    args.extend(["-t".into(), fmt(total)]);
     args.extend(["-progress".into(), "pipe:1".into()]);
     args.push(tmp_output.to_string_lossy().into_owned());
 
@@ -733,12 +822,12 @@ mod tests {
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 6.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
             start: 2.0, end: 4.0,
-            yaw: 0.0, pitch: 0.0, roll: 0.0, width_deg: 60.0,
+            yaw: 0.0, pitch: 0.0, roll: 0.0, width_deg: 60.0, fade_in: 0.0, fade_out: 0.0,
         }];
         let settings = ExportSettings {
             output: dir.join("out.mp4").to_string_lossy().into_owned(),
@@ -803,11 +892,11 @@ mod tests {
         // the clip's own yaw must not drag the card along with it.
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
-            start: 0.0, end: 3.0, yaw: YAW, pitch: 0.0, roll: 0.0, width_deg: CARD_DEG,
+            start: 0.0, end: 3.0, yaw: YAW, pitch: 0.0, roll: 0.0, width_deg: CARD_DEG, fade_in: 0.0, fade_out: 0.0,
         }];
         let (w, h) = (1024usize, 512usize);
         let settings = ExportSettings {
@@ -839,6 +928,60 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Mean redness of the card region, as a proxy for its opacity.
+    fn card_strength(video: &str, at: f64) -> u8 {
+        let out = Command::new(ffmpeg())
+            .args(["-v", "error", "-ss", &format!("{at}"), "-i", video, "-frames:v", "1",
+                   "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+            .output()
+            .unwrap();
+        out.stdout.chunks_exact(3).filter(|p| p[1] < 80 && p[2] < 90).map(|p| p[0]).max().unwrap_or(0)
+    }
+
+    #[test]
+    fn card_fades_up_and_down() {
+        let dir = std::env::temp_dir().join(format!("editor360-fade-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen_plain(&dir, "a.mp4", 8);
+        let (png_base64, png_width, png_height) = card_png_base64(&dir);
+        let clips = vec![ExportClip {
+            path: src, in_point: 0.0, out_point: 8.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
+        }];
+        let cards = vec![ExportCard {
+            png_base64, png_width, png_height,
+            start: 2.0, end: 6.0, yaw: 0.0, pitch: 0.0, roll: 0.0, width_deg: 60.0,
+            fade_in: 1.0, fade_out: 1.0,
+        }];
+        let settings = ExportSettings {
+            output: dir.join("out.mp4").to_string_lossy().into_owned(),
+            encoder: "libx264".into(), width: 1024, height: 512, fps: 30.0,
+            video_bitrate_mbps: 12.0, audio_bitrate_kbps: 128,
+            stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
+        };
+        let tmp = dir.join("tmp.mp4");
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
+        run(&plan, &ExportHandle::default(), |_| {}).unwrap();
+        let v = tmp.to_string_lossy().into_owned();
+
+        let before = card_strength(&v, 1.0);
+        let rising = card_strength(&v, 2.5);
+        let full = card_strength(&v, 4.0);
+        let falling = card_strength(&v, 5.5);
+        let after = card_strength(&v, 7.0);
+
+        assert!(before < 60, "card showing before its range ({before})");
+        assert!(after < 60, "card showing after its range ({after})");
+        assert!(full > 180, "card never reaches full opacity ({full})");
+        assert!(rising > before + 30 && rising < full - 30,
+                "fade-in not ramping: before={before} rising={rising} full={full}");
+        assert!(falling > after + 30 && falling < full - 30,
+                "fade-out not ramping: full={full} falling={falling} after={after}");
+
+        for f in &plan.temp_files { let _ = std::fs::remove_file(f); }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn export_two_clips_end_to_end() {
         let dir = std::env::temp_dir().join(format!("editor360-export-{}", uuid::Uuid::new_v4()));
@@ -846,8 +989,8 @@ mod tests {
         let a = gen(&dir, "a.mp4", true, 4);
         let b = gen(&dir, "b.mp4", false, 4);
         let clips = vec![
-            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320 },
-            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320 },
+            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0 },
+            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0 },
         ];
         let encoders = available_encoders().unwrap();
         let encoder = if encoders.iter().any(|e| e == "libx264") { "libx264" } else { &encoders[0] }.to_string();

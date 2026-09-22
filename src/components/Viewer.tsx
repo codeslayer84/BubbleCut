@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { clipAt, clipLength, useStore } from "../lib/store";
 import { cameraQuaternion, cardQuaternion, clipQuaternion } from "../lib/orientation";
-import { renderCard } from "../lib/cardRender";
+import { cardOpacity, renderCard } from "../lib/cardRender";
 import { mediaUrl } from "../lib/tauri";
 import type { MediaInfo, TextCard } from "../lib/types";
 
@@ -107,8 +107,10 @@ export function Viewer() {
       const clipQ = at ? clipQuaternion(at.clip, tmpClipQ) : tmpClipQ.identity();
       for (const cm of cardMeshes.current) {
         const c = cm.card;
-        cm.mesh.visible = playhead >= c.start && playhead <= c.end;
+        const opacity = cardOpacity(c, playhead);
+        cm.mesh.visible = opacity > 0.001;
         if (!cm.mesh.visible) continue;
+        (cm.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
         tmpQ.copy(clipQ).multiply(cardQuaternion(c, tmpCardQ));
         cm.mesh.quaternion.copy(tmpQ);
         cm.mesh.position.set(0, 0, -CARD_R).applyQuaternion(tmpQ);

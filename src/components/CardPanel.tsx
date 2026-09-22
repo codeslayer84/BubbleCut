@@ -88,6 +88,22 @@ export function CardPanel() {
             <button onClick={() => set({ start: 0, end: total })}>Whole video</button>
           </div>
 
+          <div className="grid2">
+            <label className="field">
+              <span>Fade in (s)</span>
+              <input type="number" step={0.1} min={0} max={10} value={round(card.fadeIn)}
+                onChange={(e) => set({ fadeIn: Math.max(0, +e.target.value) })} />
+            </label>
+            <label className="field">
+              <span>Fade out (s)</span>
+              <input type="number" step={0.1} min={0} max={10} value={round(card.fadeOut)}
+                onChange={(e) => set({ fadeOut: Math.max(0, +e.target.value) })} />
+            </label>
+          </div>
+          {card.fadeIn + card.fadeOut > card.end - card.start && (
+            <p className="hint">Fades are longer than the card — it never reaches full opacity.</p>
+          )}
+
           <h3>Where</h3>
           <div className="row">
             <button className="primary" onClick={() => { set(cardAnglesFromView(view)); }}>

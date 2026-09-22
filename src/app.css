@@ -101,3 +101,7 @@ aside.right { border-left: 1px solid var(--border); }
 .card-list button { grid-row: 1 / span 2; padding: 2px 8px; }
 .cards .angle { grid-template-columns: 52px 1fr 60px 22px; }
 .cards .unit { font-size: 11px; }
+
+.warn { background: #3a3218; border: 1px solid #6b5a2b; border-radius: 6px; padding: 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.warn b { color: #f0c674; }
+.warn pre { margin: 0; }

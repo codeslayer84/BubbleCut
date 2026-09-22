@@ -22,6 +22,11 @@ export const isTauri = "__TAURI_INTERNALS__" in window;
 export interface FfmpegInfo {
   version: string;
   encoders: string[];
+  path: string;
+  archs: string[];
+  hostArch: string;
+  /** ffmpeg can only run translated, so hardware encoding is unavailable. */
+  emulated: boolean;
 }
 
 export const ffmpegInfo = () => invoke<FfmpegInfo>("ffmpeg_info");
@@ -57,6 +62,7 @@ export function startExport(
       stereoMode: m?.stereoMode ?? "mono",
       width: m?.width ?? 0,
       height: m?.height ?? 0,
+      fps: m?.fps ?? 0,
     };
   });
   // Cards are rasterised here so the export matches the preview exactly.
@@ -74,6 +80,8 @@ export function startExport(
         pitch: c.pitch,
         roll: c.roll,
         widthDeg: c.widthDeg,
+        fadeIn: c.fadeIn,
+        fadeOut: c.fadeOut,
       };
     });
   return invoke<void>("start_export", { clips: exportClips, cards: exportCards, settings });

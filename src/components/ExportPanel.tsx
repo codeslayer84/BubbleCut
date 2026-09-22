@@ -91,7 +91,19 @@ export function ExportPanel() {
     <div className="export">
       <h3>Export 360° / VR</h3>
       {infoError && <div className="error">{infoError}</div>}
-      {info && <div className="hint" title={info.version}>{info.version.split(" (")[0]}</div>}
+      {info && <div className="hint" title={`${info.version}\n${info.path}`}>{info.version.split(" (")[0]}</div>}
+      {info?.emulated && (
+        <div className="warn">
+          <b>ffmpeg is running under emulation — exports will be very slow</b>
+          <div>
+            The ffmpeg at <code>{info.path}</code> is {info.archs.join("/")}-only, but this Mac is{" "}
+            {info.hostArch}. Translated code cannot use the hardware video encoder, so it falls back
+            to software encoding (often 20× slower than realtime).
+          </div>
+          <div>Install a native build, then restart the app:</div>
+          <pre className="cmd">brew install ffmpeg</pre>
+        </div>
+      )}
 
       <div className="row">
         <span className="hint">Presets:</span>

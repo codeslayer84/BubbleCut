@@ -32,6 +32,8 @@ export const defaultCard = (start: number, end: number, yaw: number, pitch: numb
   pitch,
   roll: 0,
   widthDeg: 40,
+  fadeIn: 0.5,
+  fadeOut: 0.5,
   fontSize: 120,
   bold: true,
   color: "#ffffff",
@@ -182,7 +184,8 @@ export const useStore = create<State>((set, get) => ({
     set({
       media: Object.fromEntries(p.media.map((m) => [m.path, m])),
       clips: p.clips,
-      cards: p.cards ?? [],
+      // Older projects predate fades, so the fields may be missing at runtime.
+      cards: (p.cards ?? []).map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
       selectedClipId: p.clips[0]?.id ?? null,
       selectedCardId: null,
       playhead: 0,

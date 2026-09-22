@@ -11,13 +11,26 @@ use tauri::{AppHandle, Emitter, State};
 struct FfmpegInfo {
     version: String,
     encoders: Vec<String>,
+    path: String,
+    archs: Vec<String>,
+    host_arch: String,
+    /// True when ffmpeg can only run translated, losing hardware encoding.
+    emulated: bool,
 }
 
 #[tauri::command]
 fn ffmpeg_info() -> Result<FfmpegInfo, String> {
+    let path = ffmpeg::find_binary("ffmpeg").map_err(|e| e.to_string())?;
+    let archs = ffmpeg::binary_archs(&path);
+    let host_arch = ffmpeg::host_arch().to_string();
+    let emulated = !archs.is_empty() && !archs.contains(&host_arch);
     Ok(FfmpegInfo {
         version: ffmpeg::version().map_err(|e| e.to_string())?,
         encoders: ffmpeg::available_encoders().map_err(|e| e.to_string())?,
+        path: path.to_string_lossy().into_owned(),
+        archs,
+        host_arch,
+        emulated,
     })
 }
 
