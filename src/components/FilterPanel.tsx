@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { defaultParams, FILTERS, filterByName } from "../lib/filterShaders";
 import { clipAt, useStore } from "../lib/store";
 
@@ -7,10 +8,19 @@ export function FilterPanel() {
   const selectedId = useStore((s) => s.selectedClipId);
   const playhead = useStore((s) => s.playhead);
   const previewFilters = useStore((s) => s.previewFilters);
+  const presets = useStore((s) => s.presets);
+  const [presetName, setPresetName] = useState("");
+  const [chosenPreset, setChosenPreset] = useState("");
+  const [presetError, setPresetError] = useState<string | null>(null);
   const {
     addFilter, updateFilter, removeFilter, moveFilter, copyFiltersToAllClips,
     setPreviewFilters, selectClip,
+    refreshPresets, savePresetFromClip, deletePreset, applyPresetToClip,
   } = useStore.getState();
+
+  useEffect(() => {
+    void refreshPresets();
+  }, []);
 
   // Edit whichever clip is selected, falling back to the one under the playhead.
   const clip = clips.find((c) => c.id === selectedId) ?? clipAt(clips, playhead)?.clip ?? null;
@@ -68,6 +78,64 @@ export function FilterPanel() {
       {!previewFilters && filters.length > 0 && (
         <p className="hint">Preview is unfiltered; the export still applies them.</p>
       )}
+
+      <h3>Presets</h3>
+      <div className="row">
+        <select value={chosenPreset} onChange={(e) => setChosenPreset(e.target.value)}>
+          <option value="">{presets.length ? "Choose a preset…" : "No presets saved yet"}</option>
+          {presets.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name} ({p.filters.length})
+            </option>
+          ))}
+        </select>
+        <button
+          disabled={!chosenPreset}
+          onClick={() => applyPresetToClip(clip.id, chosenPreset)}
+          title="Replace this clip's filters with the preset"
+        >
+          Apply
+        </button>
+        <button
+          className="danger"
+          disabled={!chosenPreset}
+          onClick={() => { void deletePreset(chosenPreset); setChosenPreset(""); }}
+          title="Delete this preset"
+        >
+          ×
+        </button>
+      </div>
+      <div className="row">
+        <input
+          type="text"
+          placeholder="Name this look…"
+          value={presetName}
+          onChange={(e) => setPresetName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && presetName.trim() && filters.length) {
+              void savePresetFromClip(clip.id, presetName).then(setPresetError);
+              setPresetName("");
+            }
+          }}
+        />
+        <button
+          disabled={!presetName.trim() || filters.length === 0}
+          onClick={() => {
+            void savePresetFromClip(clip.id, presetName).then(setPresetError);
+            setPresetName("");
+          }}
+          title="Save this clip's filters, with their settings, for reuse"
+        >
+          Save
+        </button>
+      </div>
+      {presetError && <div className="error">Could not save the preset: {presetError}</div>}
+      <p className="hint">
+        Presets keep the filters and their settings, and are shared across projects.
+        {presets.some((p) => p.name === presetName.trim()) && presetName.trim()
+          ? " Saving replaces the preset of that name."
+          : ""}
+      </p>
 
       {filters.length === 0 && <p className="hint">No filters on this clip. It exports untouched.</p>}
 

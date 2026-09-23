@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { loadPresets, savePresets, type FilterPreset } from "./presets";
 import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
@@ -55,6 +56,8 @@ interface State {
   previewFilters: boolean;
   /** Which panel the right sidebar is showing. */
   rightTab: RightTab;
+  /** Saved filter chains, shared across projects. */
+  presets: FilterPreset[];
   selectedClipId: string | null;
   selectedCardId: string | null;
   playhead: number;
@@ -74,6 +77,10 @@ interface State {
   copyFiltersToAllClips: (clipId: string) => void;
   setPreviewFilters: (on: boolean) => void;
   setRightTab: (tab: RightTab) => void;
+  refreshPresets: () => Promise<void>;
+  savePresetFromClip: (clipId: string, name: string) => Promise<string | null>;
+  deletePreset: (name: string) => Promise<void>;
+  applyPresetToClip: (clipId: string, name: string) => void;
   addCard: (card: TextCard) => void;
   updateCard: (id: string, patch: Partial<TextCard>) => void;
   removeCard: (id: string) => void;
@@ -98,6 +105,7 @@ export const useStore = create<State>((set, get) => ({
   cards: [],
   previewFilters: true,
   rightTab: "edit",
+  presets: [],
   selectedClipId: null,
   selectedCardId: null,
   playhead: 0,
@@ -198,6 +206,57 @@ export const useStore = create<State>((set, get) => ({
     }),
   setPreviewFilters: (previewFilters) => set({ previewFilters }),
   setRightTab: (rightTab) => set({ rightTab }),
+
+  refreshPresets: async () => set({ presets: await loadPresets() }),
+
+  savePresetFromClip: async (clipId, name) => {
+    const clip = get().clips.find((c) => c.id === clipId);
+    if (!clip) return "no clip selected";
+    const preset: FilterPreset = {
+      name: name.trim(),
+      filters: clip.filters.map((f) => ({ name: f.name, params: { ...f.params } })),
+    };
+    // Saving under an existing name replaces it, which is what "save" means
+    // when you have tweaked a look and want to keep the new version.
+    const list = [...get().presets.filter((p) => p.name !== preset.name), preset]
+      .sort((a, b) => a.name.localeCompare(b.name));
+    set({ presets: list });
+    try {
+      await savePresets(list);
+    } catch (e) {
+      return String(e);
+    }
+    return null;
+  },
+
+  deletePreset: async (name) => {
+    const list = get().presets.filter((p) => p.name !== name);
+    set({ presets: list });
+    await savePresets(list);
+  },
+
+  applyPresetToClip: (clipId, name) =>
+    set((s) => {
+      const preset = s.presets.find((p) => p.name === name);
+      if (!preset) return {};
+      return {
+        clips: s.clips.map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                // Fresh ids so the applied filters edit independently of the
+                // preset they came from.
+                filters: preset.filters.map((f) => ({
+                  id: newId(),
+                  name: f.name,
+                  params: { ...f.params },
+                })),
+              }
+            : c,
+        ),
+        dirty: true,
+      };
+    }),
   addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
   updateCard: (id, patch) =>
     set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)), dirty: true })),

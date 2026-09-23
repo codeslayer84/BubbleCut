@@ -280,6 +280,91 @@ export const FILTERS: FilterDef[] = [
       }`,
   },
   {
+    name: "Watercolour",
+    recompileOn: "washSize",
+    params: [
+      { key: "washSize", label: "Wash size", min: 1, max: 10, step: 1, default: 4 },
+      { key: "bleed", label: "Bleed", min: 0, max: 3, step: 0.05, default: 1 },
+      { key: "pooling", label: "Edge pooling", min: 0, max: 2, step: 0.05, default: 1 },
+      { key: "granulation", label: "Granulation", min: 0, max: 2, step: 0.05, default: 1 },
+      { key: "vibrance", label: "Vibrance", min: 0, max: 3, step: 0.05, default: 1.5 },
+    ],
+    fragment: `
+      ${LUMINANCE}
+      float wcHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float wcNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f0 = fract(p);
+        vec2 f = f0 * f0 * (3.0 - 2.0 * f0);
+        float a = wcHash(i);
+        float b = wcHash(i + vec2(1.0, 0.0));
+        float c = wcHash(i + vec2(0.0, 1.0));
+        float d = wcHash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      // Of the four quadrants around a pixel the most even one wins, so the
+      // colour pools into flat washes without bleeding across a boundary.
+      vec3 wcWash(vec2 uv, vec2 texel) {
+        vec3 sum0 = vec3(0.0); vec3 sq0 = vec3(0.0);
+        vec3 sum1 = vec3(0.0); vec3 sq1 = vec3(0.0);
+        vec3 sum2 = vec3(0.0); vec3 sq2 = vec3(0.0);
+        vec3 sum3 = vec3(0.0); vec3 sq3 = vec3(0.0);
+        float n = 0.0;
+        for (int i = 0; i <= RADIUS; i++) {
+          for (int j = 0; j <= RADIUS; j++) {
+            vec2 off = vec2(float(i), float(j)) * texel;
+            vec3 a = texture2D(uSampler, uv + vec2( off.x,  off.y)).rgb;
+            vec3 b = texture2D(uSampler, uv + vec2(-off.x,  off.y)).rgb;
+            vec3 c = texture2D(uSampler, uv + vec2( off.x, -off.y)).rgb;
+            vec3 d = texture2D(uSampler, uv + vec2(-off.x, -off.y)).rgb;
+            sum0 += a; sq0 += a * a;
+            sum1 += b; sq1 += b * b;
+            sum2 += c; sq2 += c * c;
+            sum3 += d; sq3 += d * d;
+            n += 1.0;
+          }
+        }
+        vec3 m0 = sum0 / n; vec3 v0v = sq0 / n - m0 * m0; float v0 = v0v.r + v0v.g + v0v.b;
+        vec3 m1 = sum1 / n; vec3 v1v = sq1 / n - m1 * m1; float v1 = v1v.r + v1v.g + v1v.b;
+        vec3 m2 = sum2 / n; vec3 v2v = sq2 / n - m2 * m2; float v2 = v2v.r + v2v.g + v2v.b;
+        vec3 m3 = sum3 / n; vec3 v3v = sq3 / n - m3 * m3; float v3 = v3v.r + v3v.g + v3v.b;
+        vec3 outc = m0; float best = v0;
+        if (v1 < best) { best = v1; outc = m1; }
+        if (v2 < best) { best = v2; outc = m2; }
+        if (v3 < best) { best = v3; outc = m3; }
+        return outc;
+      }
+      void main() {
+        vec2 texel = vec2(uInvWidth, uInvHeight);
+        float n1 = wcNoise(vTexCoord * 6.0);
+        float n2 = wcNoise(vTexCoord * 6.0 + vec2(37.0, 11.0));
+        vec2 wuv = vTexCoord + (vec2(n1, n2) - vec2(0.5)) * p1 * texel * 18.0;
+
+        vec3 col = wcWash(wuv, texel);
+
+        float gx = mashLuminance(texture2D(uSampler, wuv + vec2(texel.x * 2.0, 0.0)).rgb)
+                 - mashLuminance(texture2D(uSampler, wuv - vec2(texel.x * 2.0, 0.0)).rgb);
+        float gy = mashLuminance(texture2D(uSampler, wuv + vec2(0.0, texel.y * 2.0)).rgb)
+                 - mashLuminance(texture2D(uSampler, wuv - vec2(0.0, texel.y * 2.0)).rgb);
+        float rim = smoothstep(0.01, 0.16, length(vec2(gx, gy)));
+        col *= 1.0 - 0.55 * p2 * rim;
+
+        float blotch = wcNoise(vTexCoord * 14.0);
+        col *= 0.90 + 0.20 * blotch;
+
+        float lum = mashLuminance(col);
+        float pigment = clamp(1.0 - lum, 0.0, 1.0);
+        float grain = wcNoise(vTexCoord / texel * 0.55) * 0.65
+                    + wcNoise(vTexCoord / texel * 1.7) * 0.35;
+        col *= 1.0 - 0.30 * p3 * grain * (0.35 + 0.65 * pigment);
+
+        float grey = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(vec3(grey), col, p4);
+        col = mix(col, vec3(1.0), 0.07);
+        gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+      }`,
+  },
+  {
     name: "Pencil Drawing",
     recompileOn: "shading",
     params: [

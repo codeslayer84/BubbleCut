@@ -58,6 +58,13 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
             ("saturation", 3, 1.35),
         ]),
         "Painting" => Some(&[("radius", 0, 10.0), ("intensity", 1, 1.0)]),
+        "Watercolour" => Some(&[
+            ("washSize", 0, 4.0),
+            ("bleed", 1, 1.0),
+            ("pooling", 2, 1.0),
+            ("granulation", 3, 1.0),
+            ("vibrance", 4, 1.5),
+        ]),
         "Pencil Drawing" => Some(&[
             ("shading", 0, 6.0),
             ("lineStrength", 1, 1.0),
@@ -76,7 +83,7 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
 
 /// Every filter this build can apply, in the order 360mash lists them.
 pub fn available_filters() -> Vec<String> {
-    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting", "Van Gogh", "Pencil Drawing"]
+    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting", "Van Gogh", "Watercolour", "Pencil Drawing"]
         .iter()
         .map(|s| s.to_string())
         .collect()
@@ -102,6 +109,7 @@ fn shader_source(name: &str) -> Option<&'static str> {
         "Van Gogh" => include_str!("shaders/vangogh.wgsl"),
         "Painting" => include_str!("shaders/painting.wgsl"),
         "Painting.edge" => include_str!("shaders/painting_edge.wgsl"),
+        "Watercolour" => include_str!("shaders/watercolor.wgsl"),
         "Pencil Drawing" => include_str!("shaders/pencil.wgsl"),
         "Pencil Drawing.blur" => include_str!("shaders/pencil_blur.wgsl"),
         _ => return None,
@@ -119,7 +127,7 @@ const HELPERS: &str = include_str!("shaders/helpers.wgsl");
 /// pipeline of its own.
 fn pipeline_key(name: &str, spec: &FilterSpec) -> String {
     match name {
-        "Monet" | "Van Gogh" | "Pencil Drawing" | "Pencil Drawing.blur" =>
+        "Monet" | "Van Gogh" | "Watercolour" | "Pencil Drawing" | "Pencil Drawing.blur" =>
             format!("{name}@{}", baked_radius(name, spec)),
         _ => name.to_string(),
     }
@@ -129,6 +137,7 @@ fn baked_radius(name: &str, spec: &FilterSpec) -> i32 {
     match name {
         "Monet" => spec.params.get("radius").copied().unwrap_or(3.0).round().clamp(1.0, 12.0) as i32,
         "Van Gogh" => spec.params.get("strokeLength").copied().unwrap_or(14.0).round().clamp(2.0, 30.0) as i32,
+        "Watercolour" => spec.params.get("washSize").copied().unwrap_or(4.0).round().clamp(1.0, 10.0) as i32,
         "Pencil Drawing" | "Pencil Drawing.blur" =>
             spec.params.get("shading").copied().unwrap_or(6.0).round().clamp(1.0, 16.0) as i32,
         _ => 0,

@@ -33,7 +33,8 @@ decode/encode step.
   open that clip's filters when clicked. The image filters from
   [360mash](https://www.bigvideo.aau.dk/) — Grayscale, Pixelate, News Print,
   Charcoal, Cartoon, Monet and Painting — running the same shader maths, plus
-  a **Van Gogh** and a **Pencil Drawing** filter of our own, with
+  a **Van Gogh**, a **Watercolour** and a **Pencil Drawing** filter of our
+  own, with
   a live preview. Each clip carries its own chain, with "Apply to all clips"
   when you want the lot. 360mash encodes with libav compiled to WebAssembly; here the
   shaders run on the GPU through wgpu while ffmpeg keeps the decoding and the
@@ -141,6 +142,23 @@ direction and its opposite describe the same stroke. The structure tensor is
 averaged instead and its minor eigenvector taken; without that the strokes
 scatter wherever the detail is fine.
 
+## The Watercolour filter
+
+Four things make watercolour read as watercolour, and the filter does all of
+them: the paint pools into flat washes rather than shading smoothly (a
+Kuwahara filter, which keeps the boundaries crisp); water carries pigment past
+the drawing, so sampling is displaced by a slow noise and the washes wander off
+the picture's own edges; pigment collects as a wash dries at its rim, which is
+the dark line around every shape; and it settles into the tooth of the paper,
+which is the grain. A slow blotching keeps any wash from being perfectly even.
+
+## Presets
+
+A clip's filters, with their settings, can be saved under a name and applied
+to any clip in any project. They live outside the project file, in the app's
+config folder, so a look built for one recording carries over to the next and
+the file can be handed to someone else.
+
 ## The Pencil Drawing filter
 
 Tone comes from the dodge trick: divide the grey by one minus its blurred
@@ -165,6 +183,7 @@ preview does it in one pass and gets the same answer.
   Planned: generate 2K proxies with ffmpeg for editing.
 - Cuts only; no transitions yet.
 - Filter settings are fixed for a clip; they cannot be keyframed.
+- Presets store the filter chain only, not card or orientation settings.
 - The filtered export is dominated by moving 4K frames through pipes rather
   than by the shaders. Keeping frames on the GPU, or using rgb24 instead of
   rgba, would be the place to look for more speed.
