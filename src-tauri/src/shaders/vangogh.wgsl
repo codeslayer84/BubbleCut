@@ -10,30 +10,6 @@
 // p0 unused (stroke length is baked in as RADIUS), p1 = stroke detail,
 // p2 = impasto, p3 = saturation.
 
-fn hash21(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
-}
-
-fn vnoise(p: vec2<f32>) -> f32 {
-    let i = floor(p);
-    let f0 = fract(p);
-    let f = f0 * f0 * (3.0 - 2.0 * f0);
-    let a = hash21(i);
-    let b = hash21(i + vec2<f32>(1.0, 0.0));
-    let c = hash21(i + vec2<f32>(0.0, 1.0));
-    let d = hash21(i + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-fn gradient_at(uv: vec2<f32>, texel: vec2<f32>) -> vec2<f32> {
-    let step = 2.0;
-    let gx = luminance(textureSample(src, samp, uv + vec2<f32>(texel.x * step, 0.0)).rgb)
-           - luminance(textureSample(src, samp, uv - vec2<f32>(texel.x * step, 0.0)).rgb);
-    let gy = luminance(textureSample(src, samp, uv + vec2<f32>(0.0, texel.y * step)).rgb)
-           - luminance(textureSample(src, samp, uv - vec2<f32>(0.0, texel.y * step)).rgb);
-    return vec2<f32>(gx, gy);
-}
-
 // Direction the brush travels: along contours, not across them.
 //
 // Averaging raw gradients would cancel out, because a direction and its
@@ -49,7 +25,7 @@ fn flow_at(uv: vec2<f32>, texel: vec2<f32>) -> vec2<f32> {
     for (var i = -1; i <= 1; i = i + 1) {
         for (var j = -1; j <= 1; j = j + 1) {
             let at = uv + vec2<f32>(f32(i), f32(j)) * texel * spread;
-            let g = gradient_at(at, texel);
+            let g = gradient_at(at, texel, 2.0);
             jxx = jxx + g.x * g.x;
             jxy = jxy + g.x * g.y;
             jyy = jyy + g.y * g.y;

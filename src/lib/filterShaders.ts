@@ -280,6 +280,82 @@ export const FILTERS: FilterDef[] = [
       }`,
   },
   {
+    name: "Pencil Drawing",
+    recompileOn: "shading",
+    params: [
+      { key: "shading", label: "Shading spread", min: 1, max: 16, step: 1, default: 6 },
+      { key: "lineStrength", label: "Line strength", min: 0, max: 3, step: 0.05, default: 1 },
+      { key: "hatching", label: "Hatching", min: 0, max: 3, step: 0.05, default: 1 },
+      { key: "paper", label: "Paper grain", min: 0, max: 3, step: 0.05, default: 1 },
+      { key: "contrast", label: "Contrast", min: 0.2, max: 3, step: 0.05, default: 1 },
+      { key: "tone", label: "Shading depth", min: 0, max: 1, step: 0.05, default: 0.5 },
+    ],
+    // The exporter splits the blur into two separable passes; a 2D Gaussian is
+    // separable, so doing it in one pass here gives the same result.
+    fragment: `
+      ${LUMINANCE}
+      float pcHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float pcNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f0 = fract(p);
+        vec2 f = f0 * f0 * (3.0 - 2.0 * f0);
+        float a = pcHash(i);
+        float b = pcHash(i + vec2(1.0, 0.0));
+        float c = pcHash(i + vec2(0.0, 1.0));
+        float d = pcHash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      float pcHatch(vec2 uv, vec2 texel, float angle, float freq) {
+        vec2 p = uv / texel;
+        float q = p.x * cos(angle) + p.y * sin(angle);
+        float waver = pcNoise(p * 0.02) * 2.0;
+        return 1.0 - smoothstep(0.0, 0.42, abs(sin((q + waver) * freq)));
+      }
+      void main() {
+        vec2 texel = vec2(uInvWidth, uInvHeight);
+        float sigma = max(float(RADIUS) * 0.5, 0.5);
+
+        float blurred = 0.0;
+        float wsum = 0.0;
+        for (int yi = -RADIUS; yi <= RADIUS; yi++) {
+          for (int xi = -RADIUS; xi <= RADIUS; xi++) {
+            float x = float(xi);
+            float y = float(yi);
+            float w = exp(-(x * x + y * y) / (2.0 * sigma * sigma));
+            vec3 c = texture2D(uSampler, vTexCoord + vec2(texel.x * x, texel.y * y)).rgb;
+            blurred += (1.0 - mashLuminance(c)) * w;
+            wsum += w;
+          }
+        }
+        blurred /= wsum;
+
+        float grey = mashLuminance(texture2D(uSampler, vTexCoord).rgb);
+        float tone = clamp(grey / max(1.0 - blurred, 0.004), 0.0, 1.0);
+
+        float local = clamp(1.0 - blurred, 0.0, 1.0);
+        tone *= mix(1.0, 0.25 + 0.75 * local, p5);
+
+        float gx = mashLuminance(texture2D(uSampler, vTexCoord + vec2(texel.x, 0.0)).rgb)
+                 - mashLuminance(texture2D(uSampler, vTexCoord - vec2(texel.x, 0.0)).rgb);
+        float gy = mashLuminance(texture2D(uSampler, vTexCoord + vec2(0.0, texel.y)).rgb)
+                 - mashLuminance(texture2D(uSampler, vTexCoord - vec2(0.0, texel.y)).rgb);
+        float edge = smoothstep(0.02, 0.22, length(vec2(gx, gy)));
+        tone -= edge * p1 * 0.85;
+
+        float freq = 0.55;
+        float strength = p2 * 0.30;
+        tone -= strength * pcHatch(vTexCoord, texel, 0.785, freq) * smoothstep(0.80, 0.55, local);
+        tone -= strength * pcHatch(vTexCoord, texel, -0.785, freq) * smoothstep(0.55, 0.32, local);
+        tone -= strength * pcHatch(vTexCoord, texel, 0.0, freq) * smoothstep(0.32, 0.12, local);
+
+        tone = clamp((tone - 0.5) * p4 + 0.5, 0.0, 1.0);
+        float paper = 1.0 - p3 * 0.10 * pcNoise(vTexCoord / texel * 0.8);
+        tone = clamp(tone * paper, 0.0, 1.0);
+
+        gl_FragColor = vec4(vec3(tone), 1.0);
+      }`,
+  },
+  {
     name: "Painting",
     params: [
       { key: "radius", label: "Radius", min: 1, max: 30, step: 1, default: 10 },

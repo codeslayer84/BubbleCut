@@ -58,16 +58,25 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
             ("saturation", 3, 1.35),
         ]),
         "Painting" => Some(&[("radius", 0, 10.0), ("intensity", 1, 1.0)]),
-        // An internal pass of Painting, deliberately absent from
-        // available_filters() so it never shows up as something to choose.
+        "Pencil Drawing" => Some(&[
+            ("shading", 0, 6.0),
+            ("lineStrength", 1, 1.0),
+            ("hatching", 2, 1.0),
+            ("paper", 3, 1.0),
+            ("contrast", 4, 1.0),
+            ("tone", 5, 0.5),
+        ]),
+        // Internal passes, deliberately absent from available_filters() so
+        // they never show up as something to choose.
         "Painting.edge" => Some(&[]),
+        "Pencil Drawing.blur" => Some(&[("shading", 0, 6.0)]),
         _ => None,
     }
 }
 
 /// Every filter this build can apply, in the order 360mash lists them.
 pub fn available_filters() -> Vec<String> {
-    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting", "Van Gogh"]
+    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting", "Van Gogh", "Pencil Drawing"]
         .iter()
         .map(|s| s.to_string())
         .collect()
@@ -77,6 +86,7 @@ pub fn available_filters() -> Vec<String> {
 fn prepass_of(name: &str) -> Option<&'static str> {
     match name {
         "Painting" => Some("Painting.edge"),
+        "Pencil Drawing" => Some("Pencil Drawing.blur"),
         _ => None,
     }
 }
@@ -92,6 +102,8 @@ fn shader_source(name: &str) -> Option<&'static str> {
         "Van Gogh" => include_str!("shaders/vangogh.wgsl"),
         "Painting" => include_str!("shaders/painting.wgsl"),
         "Painting.edge" => include_str!("shaders/painting_edge.wgsl"),
+        "Pencil Drawing" => include_str!("shaders/pencil.wgsl"),
+        "Pencil Drawing.blur" => include_str!("shaders/pencil_blur.wgsl"),
         _ => return None,
     };
     Some(body)
@@ -107,7 +119,8 @@ const HELPERS: &str = include_str!("shaders/helpers.wgsl");
 /// pipeline of its own.
 fn pipeline_key(name: &str, spec: &FilterSpec) -> String {
     match name {
-        "Monet" | "Van Gogh" => format!("{name}@{}", baked_radius(name, spec)),
+        "Monet" | "Van Gogh" | "Pencil Drawing" | "Pencil Drawing.blur" =>
+            format!("{name}@{}", baked_radius(name, spec)),
         _ => name.to_string(),
     }
 }
@@ -116,6 +129,8 @@ fn baked_radius(name: &str, spec: &FilterSpec) -> i32 {
     match name {
         "Monet" => spec.params.get("radius").copied().unwrap_or(3.0).round().clamp(1.0, 12.0) as i32,
         "Van Gogh" => spec.params.get("strokeLength").copied().unwrap_or(14.0).round().clamp(2.0, 30.0) as i32,
+        "Pencil Drawing" | "Pencil Drawing.blur" =>
+            spec.params.get("shading").copied().unwrap_or(6.0).round().clamp(1.0, 16.0) as i32,
         _ => 0,
     }
 }
@@ -359,7 +374,9 @@ impl FilterGpu {
             // A multi-pass filter renders its first pass into the aux texture,
             // which the main pass then reads alongside the original frame.
             if let Some(pre) = prepass_of(&spec.name) {
-                self.run_pass(pre, pre, 1, &uniforms, source, AUX, source)?;
+                let pre_key = pipeline_key(pre, spec);
+                let pre_radius = baked_radius(pre, spec);
+                self.run_pass(pre, &pre_key, pre_radius, &uniforms, source, AUX, source)?;
             }
             let aux = if prepass_of(&spec.name).is_some() { AUX } else { source };
 

@@ -33,7 +33,7 @@ decode/encode step.
   open that clip's filters when clicked. The image filters from
   [360mash](https://www.bigvideo.aau.dk/) — Grayscale, Pixelate, News Print,
   Charcoal, Cartoon, Monet and Painting — running the same shader maths, plus
-  a **Van Gogh** filter of our own, with
+  a **Van Gogh** and a **Pencil Drawing** filter of our own, with
   a live preview. Each clip carries its own chain, with "Apply to all clips"
   when you want the lot. 360mash encodes with libav compiled to WebAssembly; here the
   shaders run on the GPU through wgpu while ffmpeg keeps the decoding and the
@@ -140,6 +140,24 @@ Averaging raw gradients to steady the flow would cancel them out, since a
 direction and its opposite describe the same stroke. The structure tensor is
 averaged instead and its minor eigenvector taken; without that the strokes
 scatter wherever the detail is fine.
+
+## The Pencil Drawing filter
+
+Tone comes from the dodge trick: divide the grey by one minus its blurred
+inverse. That leaves paper white where nothing changes while pulling out every
+small shift in shading, which reads as finely worked graphite rather than a
+threshold.
+
+On its own the dodge leaves *every* flat area white however dark it really is,
+so the shading is driven by the local brightness instead. That darkens the
+paper and decides how many layers of cross hatching build up — one, two or
+three, each fading in rather than switching on, so there is no banding where a
+layer starts. Contours are measured across a single pixel to keep fine detail,
+and a little grain stands in for paper.
+
+The blur is separable, so the exporter does it as two passes (the second reads
+the first through the auxiliary texture). A 2D Gaussian is separable, so the
+preview does it in one pass and gets the same answer.
 
 ## Known limitations / next steps
 
