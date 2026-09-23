@@ -45,6 +45,24 @@ const LUMINANCE = `
     return (after - before) * 0.3333;
   }`;
 
+const COLOUR = `
+  vec3 mashHueRotate(vec3 col, float a) {
+    float c = cos(a); float s = sin(a);
+    float r = col.r; float g = col.g; float b = col.b;
+    return vec3(
+      (0.299 + 0.701*c + 0.168*s)*r + (0.587 - 0.587*c + 0.330*s)*g + (0.114 - 0.114*c - 0.497*s)*b,
+      (0.299 - 0.299*c - 0.328*s)*r + (0.587 + 0.413*c + 0.035*s)*g + (0.114 - 0.114*c + 0.292*s)*b,
+      (0.299 - 0.300*c + 1.250*s)*r + (0.587 - 0.588*c - 1.050*s)*g + (0.114 + 0.886*c - 0.203*s)*b
+    );
+  }
+  vec3 mashVibrance(vec3 col, float amount) {
+    float mx = max(col.r, max(col.g, col.b));
+    float mn = min(col.r, min(col.g, col.b));
+    float sat = clamp(mx - mn, 0.0, 1.0);
+    float grey = dot(col, vec3(0.299, 0.587, 0.114));
+    return mix(vec3(grey), col, 1.0 + amount * (1.0 - sat));
+  }`;
+
 export const FILTERS: FilterDef[] = [
   {
     name: "Grayscale",
@@ -287,10 +305,13 @@ export const FILTERS: FilterDef[] = [
       { key: "bleed", label: "Bleed", min: 0, max: 3, step: 0.05, default: 1 },
       { key: "pooling", label: "Edge pooling", min: 0, max: 2, step: 0.05, default: 1 },
       { key: "granulation", label: "Granulation", min: 0, max: 2, step: 0.05, default: 1 },
-      { key: "vibrance", label: "Vibrance", min: 0, max: 3, step: 0.05, default: 1.5 },
+      { key: "vibrance", label: "Vibrance", min: 0, max: 3, step: 0.05, default: 1.8 },
+      { key: "hueVariation", label: "Hue variation", min: 0, max: 2, step: 0.05, default: 0.8 },
+      { key: "warmCool", label: "Warm / cool", min: 0, max: 2, step: 0.05, default: 0.7 },
     ],
     fragment: `
       ${LUMINANCE}
+      ${COLOUR}
       float wcHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float wcNoise(vec2 p) {
         vec2 i = floor(p);
@@ -358,8 +379,14 @@ export const FILTERS: FilterDef[] = [
                     + wcNoise(vTexCoord / texel * 1.7) * 0.35;
         col *= 1.0 - 0.30 * p3 * grain * (0.35 + 0.65 * pigment);
 
-        float grey = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(vec3(grey), col, p4);
+        vec3 warm = vec3(1.14, 1.00, 0.84);
+        vec3 cool = vec3(0.84, 0.97, 1.16);
+        vec3 tint = mix(cool, warm, smoothstep(0.25, 0.75, mashLuminance(col)));
+        col = mix(col, col * tint, p6);
+
+        col = mashHueRotate(col, (wcNoise(vTexCoord * 4.0) - 0.5) * p5 * 1.3);
+
+        col = mashVibrance(col, p4);
         col = mix(col, vec3(1.0), 0.07);
         gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
       }`,

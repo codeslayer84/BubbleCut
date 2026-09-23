@@ -49,3 +49,28 @@ fn gradient_at(uv: vec2<f32>, texel: vec2<f32>, step: f32) -> vec2<f32> {
            - luminance(textureSample(src, samp, uv - vec2<f32>(0.0, texel.y * step)).rgb);
     return vec2<f32>(gx, gy);
 }
+
+// Rotates hue by `a` radians. Written out rather than as a matrix so there is
+// no doubt about which way round the columns go.
+fn hue_rotate(col: vec3<f32>, a: f32) -> vec3<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    let r = col.r;
+    let g = col.g;
+    let b = col.b;
+    return vec3<f32>(
+        (0.299 + 0.701 * c + 0.168 * s) * r + (0.587 - 0.587 * c + 0.330 * s) * g + (0.114 - 0.114 * c - 0.497 * s) * b,
+        (0.299 - 0.299 * c - 0.328 * s) * r + (0.587 + 0.413 * c + 0.035 * s) * g + (0.114 - 0.114 * c + 0.292 * s) * b,
+        (0.299 - 0.300 * c + 1.250 * s) * r + (0.587 - 0.588 * c - 1.050 * s) * g + (0.114 + 0.886 * c - 0.203 * s) * b,
+    );
+}
+
+// Pushes the dull colours hardest and leaves the already-vivid ones be, so
+// that flat areas gain colour instead of the strong ones clipping.
+fn vibrance(col: vec3<f32>, amount: f32) -> vec3<f32> {
+    let mx = max(col.r, max(col.g, col.b));
+    let mn = min(col.r, min(col.g, col.b));
+    let sat = clamp(mx - mn, 0.0, 1.0);
+    let grey = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+    return mix(vec3<f32>(grey), col, 1.0 + amount * (1.0 - sat));
+}

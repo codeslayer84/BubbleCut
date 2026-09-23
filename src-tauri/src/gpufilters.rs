@@ -63,7 +63,9 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
             ("bleed", 1, 1.0),
             ("pooling", 2, 1.0),
             ("granulation", 3, 1.0),
-            ("vibrance", 4, 1.5),
+            ("vibrance", 4, 1.8),
+            ("hueVariation", 5, 0.8),
+            ("warmCool", 6, 0.7),
         ]),
         "Pencil Drawing" => Some(&[
             ("shading", 0, 6.0),
@@ -149,7 +151,9 @@ fn baked_radius(name: &str, spec: &FilterSpec) -> i32 {
 struct Uniforms {
     inv_width: f32,
     inv_height: f32,
-    p: [f32; 6],
+    p: [f32; 8],
+    /// Keeps the block a multiple of 16 bytes, as uniforms require.
+    _pad: [f32; 2],
 }
 
 pub struct FilterGpu {
@@ -462,7 +466,7 @@ impl FilterGpu {
     fn uniforms_for(&self, spec: &FilterSpec, width: u32, height: u32) -> Result<Uniforms, GpuError> {
         let defs = filter_params(&spec.name)
             .ok_or_else(|| GpuError::UnknownFilter(spec.name.clone()))?;
-        let mut p = [0.0f32; 6];
+        let mut p = [0.0f32; 8];
         for (key, slot, default) in defs {
             p[*slot] = *spec.params.get(*key).copied().get_or_insert(*default);
         }
@@ -470,6 +474,7 @@ impl FilterGpu {
             inv_width: 1.0 / width as f32,
             inv_height: 1.0 / height as f32,
             p,
+            _pad: [0.0; 2],
         })
     }
 

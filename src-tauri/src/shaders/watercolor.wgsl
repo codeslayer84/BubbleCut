@@ -10,8 +10,13 @@
 //    around every shape
 //  * pigment settles into the tooth of the paper, giving the grain
 //
+// Colour is not just turned up: a wash of one pigment is never one flat hue,
+// so the hue wanders slowly across the paper, and the shadows and lights are
+// pulled apart towards cool and warm. Both put colour into areas that had
+// almost none, which raising the saturation alone cannot do.
+//
 // RADIUS is the wash size, baked in. p1 = bleed, p2 = edge pooling,
-// p3 = granulation, p4 = vibrance.
+// p3 = granulation, p4 = vibrance, p5 = hue variation, p6 = warm/cool.
 
 // Water pushing the pigment around, so the washes do not sit exactly on the
 // picture's own edges.
@@ -84,9 +89,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
               + vnoise(in.uv / texel * 1.7) * 0.35;
     col = col * (1.0 - 0.30 * u.p3 * grain * (0.35 + 0.65 * pigment));
 
+    // Shadows cool, lights warm, which is what a painter mixes rather than
+    // reaching for black.
+    let warm = vec3<f32>(1.14, 1.00, 0.84);
+    let cool = vec3<f32>(0.84, 0.97, 1.16);
+    let tint = mix(cool, warm, smoothstep(0.25, 0.75, luminance(col)));
+    col = mix(col, col * tint, u.p6);
+
+    // Pigment does not lay down as a single hue; it drifts across the wash.
+    col = hue_rotate(col, (vnoise(in.uv * 4.0) - 0.5) * u.p5 * 1.3);
+
     // Watercolour is luminous: strong pigment, but the paper shows through.
-    let grey = dot(col, vec3<f32>(0.299, 0.587, 0.114));
-    col = mix(vec3<f32>(grey), col, u.p4);
+    col = vibrance(col, u.p4);
     col = mix(col, vec3<f32>(1.0), 0.07);
 
     return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);

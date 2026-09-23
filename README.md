@@ -152,6 +152,13 @@ the picture's own edges; pigment collects as a wash dries at its rim, which is
 the dark line around every shape; and it settles into the tooth of the paper,
 which is the grain. A slow blotching keeps any wash from being perfectly even.
 
+Colour is not merely turned up. Raising the saturation cannot put colour into
+an area that has none, so the hue wanders slowly across the paper the way one
+pigment does, and the shadows and lights are pulled apart towards cool and
+warm — both of which give a nearly grey scene real colour. The vibrance on top
+pushes the dull parts hardest and leaves the vivid ones alone, so strong colour
+does not simply clip.
+
 ## Presets
 
 A clip's filters, with their settings, can be saved under a name and applied

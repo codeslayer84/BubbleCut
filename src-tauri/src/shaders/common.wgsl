@@ -12,6 +12,11 @@ struct Uniforms {
     p3: f32,
     p4: f32,
     p5: f32,
+    p6: f32,
+    p7: f32,
+    // A uniform struct has to be a multiple of 16 bytes.
+    _pad0: f32,
+    _pad1: f32,
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;

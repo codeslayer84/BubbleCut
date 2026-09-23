@@ -26,8 +26,8 @@ function fragmentFor(name: string, params: Record<string, number>): string | nul
     uniform sampler2D uSampler;
     uniform float uInvWidth;
     uniform float uInvHeight;
-    uniform float p0; uniform float p1; uniform float p2;
-    uniform float p3; uniform float p4; uniform float p5;
+    uniform float p0; uniform float p1; uniform float p2; uniform float p3;
+    uniform float p4; uniform float p5; uniform float p6; uniform float p7;
     #define RADIUS ${radius}
     ${def.fragment}`;
 }
@@ -76,8 +76,8 @@ export class FilterChain {
               uSampler: { value: null },
               uInvWidth: { value: 1 },
               uInvHeight: { value: 1 },
-              p0: { value: 0 }, p1: { value: 0 }, p2: { value: 0 },
-              p3: { value: 0 }, p4: { value: 0 }, p5: { value: 0 },
+              p0: { value: 0 }, p1: { value: 0 }, p2: { value: 0 }, p3: { value: 0 },
+              p4: { value: 0 }, p5: { value: 0 }, p6: { value: 0 }, p7: { value: 0 },
             },
           }),
         });
