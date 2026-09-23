@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cardOpacity } from "../lib/cardRender";
 import { clipLength, clipStart, fmtTime, timelineDuration, useStore } from "../lib/store";
 
 const MIN_CLIP = 0.1;
@@ -9,8 +10,12 @@ export function Timeline() {
   const playhead = useStore((s) => s.playhead);
   const playing = useStore((s) => s.playing);
   const selectedId = useStore((s) => s.selectedClipId);
-  const { setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead } =
-    useStore.getState();
+  const cards = useStore((s) => s.cards);
+  const selectedCardId = useStore((s) => s.selectedCardId);
+  const {
+    setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
+    selectCard, updateCard,
+  } = useStore.getState();
 
   const [pxPerSec, setPxPerSec] = useState(20);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -64,13 +69,76 @@ export function Timeline() {
     window.addEventListener("pointerup", up);
   };
 
+  // Dragging a card along the timeline, or taking hold of one of its ends.
+  const startCardDrag = (e: React.PointerEvent, id: string, mode: "move" | "start" | "end") => {
+    e.stopPropagation();
+    e.preventDefault();
+    setPlaying(false);
+    selectCard(id);
+    const card = useStore.getState().cards.find((c) => c.id === id)!;
+    const x0 = e.clientX;
+    const orig = { start: card.start, end: card.end };
+    const span = orig.end - orig.start;
+
+    const move = (ev: PointerEvent) => {
+      const dt = (ev.clientX - x0) / pxPerSec;
+      if (mode === "move") {
+        const start = Math.max(0, Math.min(total - span, orig.start + dt));
+        updateCard(id, { start, end: start + span });
+      } else if (mode === "start") {
+        updateCard(id, { start: Math.max(0, Math.min(orig.end - MIN_CLIP, orig.start + dt)) });
+      } else {
+        updateCard(id, { end: Math.max(orig.start + MIN_CLIP, Math.min(total, orig.end + dt)) });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // Selecting a card whose fade hides it at the playhead is confusing, so
+  // step to where it is fully on screen.
+  const revealCard = (id: string) => {
+    const card = useStore.getState().cards.find((c) => c.id === id);
+    if (!card) return;
+    if (cardOpacity(card, useStore.getState().playhead) < 1) {
+      setPlayhead(Math.min(card.end, card.start + card.fadeIn));
+    }
+  };
+
+  // Cards that overlap in time go on separate rows, so each one stays
+  // readable and can be grabbed without fighting its neighbour for the click.
+  const CARD_ROW_H = 26;
+  const CARD_ROW_GAP = 4;
+  const cardRows = (() => {
+    const rowEnds: number[] = [];
+    const placed = new Map<string, number>();
+    for (const c of [...cards].sort((a, b) => a.start - b.start)) {
+      let row = rowEnds.findIndex((end) => c.start >= end - 1e-6);
+      if (row === -1) {
+        row = rowEnds.length;
+        rowEnds.push(0);
+      }
+      rowEnds[row] = c.end;
+      placed.set(c.id, row);
+    }
+    return { placed, count: Math.max(rowEnds.length, 1) };
+  })();
+  const laneHeight = cardRows.count * CARD_ROW_H + (cardRows.count - 1) * CARD_ROW_GAP;
+
   const ticks: number[] = [];
   const step = pxPerSec > 60 ? 1 : pxPerSec > 25 ? 5 : pxPerSec > 8 ? 10 : pxPerSec > 3 ? 30 : 60;
   for (let t = 0; t <= total; t += step) ticks.push(t);
 
   let x = 0;
+  // The lane grows with the number of rows, taking the space from the viewer.
+  const timelineHeight = 152 + (cards.length ? laneHeight + 8 : 0);
+
   return (
-    <div className="timeline">
+    <div className="timeline" style={{ height: timelineHeight }}>
       <div className="timeline-toolbar">
         <button onClick={() => setPlaying(!playing)} disabled={!clips.length} title="Space">
           {playing ? "❚❚ Pause" : "▶ Play"}
@@ -124,6 +192,40 @@ export function Timeline() {
               );
             })}
           </div>
+          {cards.length > 0 && (
+            <div className="card-lane" style={{ height: laneHeight }}>
+              {cards.map((c) => {
+                const left = c.start * pxPerSec;
+                const w = Math.max((c.end - c.start) * pxPerSec, 3);
+                const row = cardRows.placed.get(c.id) ?? 0;
+                return (
+                  <div
+                    key={c.id}
+                    className={"tl-card" + (c.id === selectedCardId ? " selected" : "")}
+                    style={{ left, width: w, top: row * (CARD_ROW_H + CARD_ROW_GAP), height: CARD_ROW_H }}
+                    title={c.text}
+                    onPointerDown={(e) => { startCardDrag(e, c.id, "move"); revealCard(c.id); }}
+                  >
+                    <div
+                      className="tl-card-handle"
+                      onPointerDown={(e) => startCardDrag(e, c.id, "start")}
+                    />
+                    <div className="tl-card-label">{c.text.split("\n")[0] || "(empty)"}</div>
+                    <div
+                      className="tl-card-handle"
+                      onPointerDown={(e) => startCardDrag(e, c.id, "end")}
+                    />
+                    {c.fadeIn > 0 && (
+                      <div className="tl-card-fade in" style={{ width: Math.min(c.fadeIn * pxPerSec, w / 2) }} />
+                    )}
+                    {c.fadeOut > 0 && (
+                      <div className="tl-card-fade out" style={{ width: Math.min(c.fadeOut * pxPerSec, w / 2) }} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="playhead" style={{ left: playhead * pxPerSec }} />
         </div>
       </div>

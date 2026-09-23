@@ -13,6 +13,9 @@ decode/encode step.
 - 360° preview: drag to look around, scroll to zoom. Stereo sources preview
   the left/top eye.
 - Timeline: trim (drag clip edges or `I`/`O`), split (`S`), reorder, remove.
+  Text cards appear on their own lane beneath the clips, where they can be
+  dragged along the timeline or have either end pulled. Overlapping cards
+  stack onto separate rows, and the darkened wedges show their fades.
 - Per-clip **orientation** (yaw/pitch/roll) — set where the viewer starts
   looking. "Set current view as front" takes whatever is under the reticle.
   Preview matches ffmpeg's `v360` filter exactly.
