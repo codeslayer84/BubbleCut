@@ -190,6 +190,96 @@ export const FILTERS: FilterDef[] = [
       }`,
   },
   {
+    name: "Van Gogh",
+    recompileOn: "strokeLength",
+    params: [
+      { key: "strokeLength", label: "Stroke length", min: 2, max: 30, step: 1, default: 14 },
+      { key: "strokeDetail", label: "Bristle detail", min: 0.2, max: 4, step: 0.05, default: 1 },
+      { key: "impasto", label: "Impasto", min: 0, max: 3, step: 0.05, default: 1 },
+      { key: "saturation", label: "Saturation", min: 0, max: 2.5, step: 0.05, default: 1.35 },
+    ],
+    // Strokes follow contours rather than gradients, which is what gives the
+    // swirls; noise smeared along them makes the bristle marks, and sampling
+    // that noise again just across the stroke lights the ridges of paint.
+    fragment: `
+      ${LUMINANCE}
+      float vgHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vgNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f0 = fract(p);
+        vec2 f = f0 * f0 * (3.0 - 2.0 * f0);
+        float a = vgHash(i);
+        float b = vgHash(i + vec2(1.0, 0.0));
+        float c = vgHash(i + vec2(0.0, 1.0));
+        float d = vgHash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      vec2 vgGradient(vec2 uv, vec2 texel) {
+        float st = 2.0;
+        float gx = mashLuminance(texture2D(uSampler, uv + vec2(texel.x * st, 0.0)).rgb)
+                 - mashLuminance(texture2D(uSampler, uv - vec2(texel.x * st, 0.0)).rgb);
+        float gy = mashLuminance(texture2D(uSampler, uv + vec2(0.0, texel.y * st)).rgb)
+                 - mashLuminance(texture2D(uSampler, uv - vec2(0.0, texel.y * st)).rgb);
+        return vec2(gx, gy);
+      }
+      // Averaging the structure tensor rather than raw gradients, so that a
+      // direction and its opposite do not cancel each other out.
+      vec2 vgFlow(vec2 uv, vec2 texel) {
+        float jxx = 0.0; float jxy = 0.0; float jyy = 0.0;
+        for (int i = -1; i <= 1; i++) {
+          for (int j = -1; j <= 1; j++) {
+            vec2 at = uv + vec2(float(i), float(j)) * texel * 3.0;
+            vec2 g = vgGradient(at, texel);
+            jxx += g.x * g.x; jxy += g.x * g.y; jyy += g.y * g.y;
+          }
+        }
+        if (jxx + jyy < 1e-5) {
+          float a = vgNoise(uv * 3.0) * 6.2831853;
+          return vec2(cos(a), sin(a));
+        }
+        float diff = jxx - jyy;
+        float root = sqrt(diff * diff + 4.0 * jxy * jxy);
+        float major = 0.5 * (jxx + jyy + root);
+        vec2 across = normalize(vec2(jxy, major - jxx) + vec2(1e-8, 0.0));
+        return vec2(-across.y, across.x);
+      }
+      float vgStrokeNoise(vec2 uv, vec2 dir, vec2 texel, float freq) {
+        float total = 0.0; float count = 0.0;
+        for (int i = -RADIUS; i <= RADIUS; i++) {
+          vec2 p = uv + dir * texel * float(i) * 1.5;
+          total += vgNoise(p * freq);
+          count += 1.0;
+        }
+        return total / count;
+      }
+      void main() {
+        vec2 texel = vec2(uInvWidth, uInvHeight);
+        vec2 dir = vgFlow(vTexCoord, texel);
+        vec2 perp = vec2(-dir.y, dir.x);
+
+        vec3 col = vec3(0.0); float wsum = 0.0;
+        for (int i = -RADIUS; i <= RADIUS; i++) {
+          float t = float(i);
+          vec2 p = vTexCoord + dir * texel * t * 1.5;
+          float w = 1.0 - abs(t) / float(RADIUS + 1);
+          col += texture2D(uSampler, p).rgb * w;
+          wsum += w;
+        }
+        col /= wsum;
+
+        float freq = 140.0 * max(p1, 0.01);
+        float lic = vgStrokeNoise(vTexCoord, dir, texel, freq);
+        float licSide = vgStrokeNoise(vTexCoord + perp * texel * 2.0, dir, texel, freq);
+        float slope = licSide - lic;
+
+        col *= 0.88 + 0.5 * (lic - 0.5);
+        col += vec3(slope * p2 * 4.0);
+        float grey = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(vec3(grey), col, p3);
+        gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+      }`,
+  },
+  {
     name: "Painting",
     params: [
       { key: "radius", label: "Radius", min: 1, max: 30, step: 1, default: 10 },

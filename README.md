@@ -29,9 +29,11 @@ decode/encode step.
   While a card is selected and playback is paused it is drawn at full opacity
   so it can be positioned even when the playhead sits inside one of its fades;
   playback shows the real opacity, and the panel reports it.
-- **Filters (per clip)**: the image filters from
+- **Filters (per clip)**: shown as badges on the clip in the timeline, which
+  open that clip's filters when clicked. The image filters from
   [360mash](https://www.bigvideo.aau.dk/) — Grayscale, Pixelate, News Print,
-  Charcoal, Cartoon, Monet and Painting — running the same shader maths, with
+  Charcoal, Cartoon, Monet and Painting — running the same shader maths, plus
+  a **Van Gogh** filter of our own, with
   a live preview. Each clip carries its own chain, with "Apply to all clips"
   when you want the lot. 360mash encodes with libav compiled to WebAssembly; here the
   shaders run on the GPU through wgpu while ffmpeg keeps the decoding and the
@@ -124,6 +126,20 @@ filter graph. With filters active the export splits in three:
 
 The shaders are ported to WGSL in `src-tauri/src/shaders/`; the preview uses
 360mash's original GLSL unchanged, since the preview is WebGL too.
+
+## The Van Gogh filter
+
+Not a 360mash port. Brush strokes follow the picture's *contours* rather than
+its gradients, which is what gives Starry Night its swirls, so the stroke
+direction is the tangent of the luminance gradient. Noise smeared along that
+direction (a line integral convolution) makes the bristle marks, and sampling
+the same smeared noise again slightly across the stroke gives a slope that
+lights the ridges like thick paint.
+
+Averaging raw gradients to steady the flow would cancel them out, since a
+direction and its opposite describe the same stroke. The structure tensor is
+averaged instead and its minor eigenvector taken; without that the strokes
+scatter wherever the detail is fine.
 
 ## Known limitations / next steps
 

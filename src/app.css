@@ -132,3 +132,16 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .tl-card-fade { position: absolute; top: 0; bottom: 0; pointer-events: none; }
 .tl-card-fade.in { left: 0; background: linear-gradient(to right, rgba(0,0,0,.6), transparent); }
 .tl-card-fade.out { right: 0; background: linear-gradient(to left, rgba(0,0,0,.6), transparent); }
+
+/* ---- filters shown on a clip ---- */
+.clip-filters {
+  display: flex; gap: 3px; margin-top: 4px; overflow: hidden;
+  cursor: pointer; flex-wrap: wrap; max-height: 34px;
+}
+.clip-filter {
+  flex: none; font-size: 10px; line-height: 1.5; padding: 0 5px;
+  border-radius: 8px; white-space: nowrap;
+  background: rgba(255, 255, 255, .18); color: #eaf0ff;
+  border: 1px solid rgba(255, 255, 255, .2);
+}
+.clip-filters:hover .clip-filter { background: rgba(255, 255, 255, .34); }

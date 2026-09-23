@@ -14,7 +14,7 @@ export function Timeline() {
   const selectedCardId = useStore((s) => s.selectedCardId);
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
-    selectCard, updateCard,
+    selectCard, updateCard, setRightTab,
   } = useStore.getState();
 
   const [pxPerSec, setPxPerSec] = useState(20);
@@ -186,6 +186,24 @@ export function Timeline() {
                       {fmtTime(c.inPoint)} → {fmtTime(c.outPoint)} · {fmtTime(clipLength(c))}
                       {oriented ? ` · ↻ ${c.yaw}°/${c.pitch}°/${c.roll}°` : ""}
                     </div>
+                    {c.filters.length > 0 && (
+                      <div
+                        className="clip-filters"
+                        title={`Filters: ${c.filters.map((f) => f.name).join(" → ")}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          selectClip(c.id);
+                          setRightTab("filters");
+                        }}
+                      >
+                        {/* Names need room; a narrow clip just gets the count. */}
+                        {w >= 120
+                          ? c.filters.map((f) => (
+                              <span className="clip-filter" key={f.id}>{f.name}</span>
+                            ))
+                          : <span className="clip-filter">{c.filters.length} filter{c.filters.length === 1 ? "" : "s"}</span>}
+                      </div>
+                    )}
                   </div>
                   <div className="clip-handle right" onPointerDown={(e) => startTrim(e, c.id, "out")} />
                 </div>

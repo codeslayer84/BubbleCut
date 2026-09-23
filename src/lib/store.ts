@@ -24,6 +24,8 @@ export interface View {
   fov: number;
 }
 
+export type RightTab = "edit" | "text" | "filters" | "export" | "tools";
+
 export const defaultCard = (start: number, end: number, yaw: number, pitch: number): TextCard => ({
   id: Math.random().toString(36).slice(2, 10),
   text: "New text",
@@ -51,6 +53,8 @@ interface State {
   clips: Clip[];
   cards: TextCard[];
   previewFilters: boolean;
+  /** Which panel the right sidebar is showing. */
+  rightTab: RightTab;
   selectedClipId: string | null;
   selectedCardId: string | null;
   playhead: number;
@@ -69,6 +73,7 @@ interface State {
   moveFilter: (clipId: string, id: string, dir: -1 | 1) => void;
   copyFiltersToAllClips: (clipId: string) => void;
   setPreviewFilters: (on: boolean) => void;
+  setRightTab: (tab: RightTab) => void;
   addCard: (card: TextCard) => void;
   updateCard: (id: string, patch: Partial<TextCard>) => void;
   removeCard: (id: string) => void;
@@ -92,6 +97,7 @@ export const useStore = create<State>((set, get) => ({
   clips: [],
   cards: [],
   previewFilters: true,
+  rightTab: "edit",
   selectedClipId: null,
   selectedCardId: null,
   playhead: 0,
@@ -191,6 +197,7 @@ export const useStore = create<State>((set, get) => ({
       };
     }),
   setPreviewFilters: (previewFilters) => set({ previewFilters }),
+  setRightTab: (rightTab) => set({ rightTab }),
   addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
   updateCard: (id, patch) =>
     set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)), dirty: true })),

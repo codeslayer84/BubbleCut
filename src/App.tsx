@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Viewer } from "./components/Viewer";
 import { Timeline } from "./components/Timeline";
 import { Inspector } from "./components/Inspector";
@@ -7,15 +7,14 @@ import { ExportPanel } from "./components/ExportPanel";
 import { CardPanel } from "./components/CardPanel";
 import { FilterPanel } from "./components/FilterPanel";
 import { TagTool } from "./components/TagTool";
-import { clipAt, toProjectFile, useStore } from "./lib/store";
+import { clipAt, toProjectFile, useStore, type RightTab } from "./lib/store";
 import { isTauri, pickOpenPath, pickSavePath, readTextFile, writeTextFile } from "./lib/tauri";
 import type { ProjectFile } from "./lib/types";
 import "./app.css";
 
-type Tab = "edit" | "text" | "filters" | "export" | "tools";
-
 export default function App() {
-  const [tab, setTab] = useState<Tab>("edit");
+  const tab = useStore((s) => s.rightTab);
+  const setTab = useStore((s) => s.setRightTab);
   const projectPath = useStore((s) => s.projectPath);
   const dirty = useStore((s) => s.dirty);
 
@@ -67,7 +66,7 @@ export default function App() {
       <header>
         <div className="brand">360 Editor</div>
         <nav>
-          {(["edit", "text", "filters", "export", "tools"] as Tab[]).map((t) => (
+          {(["edit", "text", "filters", "export", "tools"] as RightTab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
               {t === "edit" ? "Edit" : t === "text" ? "Text" : t === "filters" ? "Filters"
                 : t === "export" ? "Export" : "Tools"}

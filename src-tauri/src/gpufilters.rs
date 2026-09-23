@@ -50,6 +50,13 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
         // Radius recompiles the shader rather than feeding a uniform, exactly
         // as in 360mash: a dynamic loop bound is far slower here.
         "Monet" => Some(&[("radius", 0, 3.0)]),
+        // Stroke length is baked in too, for the same reason as Monet.
+        "Van Gogh" => Some(&[
+            ("strokeLength", 0, 14.0),
+            ("strokeDetail", 1, 1.0),
+            ("impasto", 2, 1.0),
+            ("saturation", 3, 1.35),
+        ]),
         "Painting" => Some(&[("radius", 0, 10.0), ("intensity", 1, 1.0)]),
         // An internal pass of Painting, deliberately absent from
         // available_filters() so it never shows up as something to choose.
@@ -60,7 +67,7 @@ pub fn filter_params(name: &str) -> Option<&'static [(&'static str, usize, f32)]
 
 /// Every filter this build can apply, in the order 360mash lists them.
 pub fn available_filters() -> Vec<String> {
-    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting"]
+    ["Grayscale", "Pixelate", "News Print", "Charcoal", "Cartoon", "Monet", "Painting", "Van Gogh"]
         .iter()
         .map(|s| s.to_string())
         .collect()
@@ -82,6 +89,7 @@ fn shader_source(name: &str) -> Option<&'static str> {
         "News Print" => include_str!("shaders/newsprint.wgsl"),
         "Cartoon" => include_str!("shaders/cartoon.wgsl"),
         "Monet" => include_str!("shaders/monet.wgsl"),
+        "Van Gogh" => include_str!("shaders/vangogh.wgsl"),
         "Painting" => include_str!("shaders/painting.wgsl"),
         "Painting.edge" => include_str!("shaders/painting_edge.wgsl"),
         _ => return None,
@@ -94,16 +102,22 @@ const AUX: usize = 2;
 const COMMON: &str = include_str!("shaders/common.wgsl");
 const HELPERS: &str = include_str!("shaders/helpers.wgsl");
 
-/// Monet bakes its radius in, so each radius is a pipeline of its own.
+/// Some filters bake a loop bound into the shader rather than feed it as a
+/// uniform, because a dynamic bound is markedly slower. Each value is then a
+/// pipeline of its own.
 fn pipeline_key(name: &str, spec: &FilterSpec) -> String {
-    if name == "Monet" {
-        return format!("Monet@{}", monet_radius(spec));
+    match name {
+        "Monet" | "Van Gogh" => format!("{name}@{}", baked_radius(name, spec)),
+        _ => name.to_string(),
     }
-    name.to_string()
 }
 
-fn monet_radius(spec: &FilterSpec) -> i32 {
-    spec.params.get("radius").copied().unwrap_or(3.0).round().clamp(1.0, 12.0) as i32
+fn baked_radius(name: &str, spec: &FilterSpec) -> i32 {
+    match name {
+        "Monet" => spec.params.get("radius").copied().unwrap_or(3.0).round().clamp(1.0, 12.0) as i32,
+        "Van Gogh" => spec.params.get("strokeLength").copied().unwrap_or(14.0).round().clamp(2.0, 30.0) as i32,
+        _ => 0,
+    }
 }
 
 #[repr(C)]
@@ -350,7 +364,7 @@ impl FilterGpu {
             let aux = if prepass_of(&spec.name).is_some() { AUX } else { source };
 
             let key = pipeline_key(&spec.name, spec);
-            let radius = monet_radius(spec);
+            let radius = baked_radius(&spec.name, spec);
             let dest = 1 - source;
             self.run_pass(&spec.name, &key, radius, &uniforms, source, dest, aux)?;
             source = dest;
