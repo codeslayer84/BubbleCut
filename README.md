@@ -141,7 +141,7 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
 | I / O | Set in / out point at playhead |
 | S | Split at playhead |
 | Delete | Remove selected clip |
-| Cmd-click | Add or remove a clip from the selection |
+| Cmd-click | Add or remove a clip from the selection, edges included |
 | Shift-click | Select a run of clips |
 
 ## How export works

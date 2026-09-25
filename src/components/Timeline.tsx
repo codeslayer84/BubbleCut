@@ -50,6 +50,18 @@ export function Timeline() {
     e.stopPropagation();
     e.preventDefault();
     setPlaying(false);
+
+    // The handles sit at the clip edges, which is exactly where someone aims
+    // when picking a clip out. With a modifier held, select rather than trim.
+    if (e.metaKey || e.ctrlKey) {
+      toggleClipSelected(id);
+      return;
+    }
+    if (e.shiftKey) {
+      selectClipRange(id);
+      return;
+    }
+
     selectClip(id);
     const clip = useStore.getState().clips.find((c) => c.id === id)!;
     const m = media[clip.mediaPath];
@@ -202,6 +214,20 @@ export function Timeline() {
           title="End the export selection here"
         >
           ]
+        </button>
+        <button
+          onClick={() => {
+            const all = useStore.getState().clips;
+            const everything = selectedIds.length === all.length;
+            useStore.setState({
+              selectedClipIds: everything ? [] : all.map((c) => c.id),
+              selectedClipId: everything ? null : all[all.length - 1]?.id ?? null,
+            });
+          }}
+          disabled={clips.length < 2}
+          title="Select every clip, for exporting them separately"
+        >
+          {selectedIds.length === clips.length && clips.length > 1 ? "Deselect all" : "Select all"}
         </button>
         {selectedIds.length > 1 && (
           <span className="hint sel-readout">{selectedIds.length} clips selected</span>
