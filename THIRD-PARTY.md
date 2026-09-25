@@ -30,9 +30,14 @@ Bubblecut runs `ffmpeg` and `ffprobe` as separate processes and does not link
 against their libraries, so no FFmpeg code is distributed with it today and
 FFmpeg's licence does not reach this project's own code.
 
-That changes the moment an ffmpeg binary is bundled inside the `.app` for
-distribution, which is the obvious next step for shipping to colleagues. At
-that point FFmpeg is being redistributed and its own terms apply. A build
+Bundling it was considered and deliberately not done. Doing so would mean
+redistributing FFmpeg under its own terms — with a GPL build, an obligation to
+offer that build's corresponding source — and the convenient prebuilt packages
+turn out to be configured `--enable-nonfree`, which may not be redistributed at
+all. Instead the app checks for FFmpeg at startup and tells the user how to
+install it.
+
+If it is ever bundled, FFmpeg's own terms apply from that moment. A build
 configured with `--enable-gpl --enable-version3` — as the Homebrew build on
 the development machine is — is GPL-3.0, which is compatible with this
 project's GPL-3.0, but it obliges you to offer the corresponding source for

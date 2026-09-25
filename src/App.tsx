@@ -7,6 +7,7 @@ import { ExportPanel } from "./components/ExportPanel";
 import { CardPanel } from "./components/CardPanel";
 import { FilterPanel } from "./components/FilterPanel";
 import { About } from "./components/About";
+import { FfmpegGate } from "./components/FfmpegGate";
 import { TagTool } from "./components/TagTool";
 import { clipAt, toProjectFile, useStore, type RightTab } from "./lib/store";
 import { isTauri, pickOpenPath, pickSavePath, readTextFile, writeTextFile } from "./lib/tauri";
@@ -105,6 +106,7 @@ export default function App() {
         </aside>
       </main>
 
+      <FfmpegGate />
       {showAbout && <About onClose={() => setShowAbout(false)} />}
     </div>
   );

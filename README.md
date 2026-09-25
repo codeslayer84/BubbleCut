@@ -83,7 +83,9 @@ publishing. Cite the tool with [CITATION.cff](CITATION.cff).
 ## Requirements
 
 - macOS (Linux/Windows should work but are untested)
-- A **native** `ffmpeg` + `ffprobe` (`brew install ffmpeg`). On Apple Silicon an
+- A **native** `ffmpeg` + `ffprobe` (`brew install ffmpeg`). Not bundled, on
+  purpose — see [THIRD-PARTY.md](THIRD-PARTY.md). The app checks at startup and
+  shows the install command for your platform if it cannot find them. On Apple Silicon an
   Intel-only build runs under Rosetta, loses the hardware video encoder and is
   about 20x slower; the app prefers a native binary and warns if only an
   emulated one is found.
