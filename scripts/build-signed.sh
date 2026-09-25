@@ -23,6 +23,18 @@ load_env() {
       \"*\") val=${val#\"}; val=${val%\"} ;;
       \'*\') val=${val#\'}; val=${val%\'} ;;
     esac
+
+    # An empty value must not be exported. Tauri treats a variable that is set
+    # but blank as a request to use it, then fails on the empty string:
+    #   The value '' is invalid for '--issuer <issuer>'
+    [ -n "$val" ] || continue
+
+    # Anything already in the environment wins, so NOTARIZE=0 ./build-signed.sh
+    # is not undone by a blank line in the file.
+    if [ -n "$(eval "printf '%s' \"\${$key-}\"")" ]; then
+      continue
+    fi
+
     export "$key=$val"
   done < "$file"
 }
@@ -69,3 +81,29 @@ else
 fi
 
 npm run tauri build -- "$@"
+
+# Tauri notarizes and staples the .app but leaves the .dmg alone, and the .dmg
+# is what people download. Without its own ticket macOS has to ask Apple over
+# the network, so an offline machine refuses to mount it.
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "${NOTARIZE:-1}" != "0" ]; then
+  for dmg in src-tauri/target/release/bundle/dmg/*.dmg; do
+    [ -f "$dmg" ] || continue
+    if xcrun stapler validate "$dmg" >/dev/null 2>&1; then
+      echo "Already stapled: $(basename "$dmg")"
+      continue
+    fi
+    if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+      echo "Notarizing $(basename "$dmg")..."
+      xcrun notarytool submit "$dmg" \
+        --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+        --wait || { echo "notarization failed" >&2; exit 1; }
+      xcrun stapler staple "$dmg"
+    elif [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+      echo "Notarizing $(basename "$dmg")..."
+      xcrun notarytool submit "$dmg" \
+        --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+        --wait || { echo "notarization failed" >&2; exit 1; }
+      xcrun stapler staple "$dmg"
+    fi
+  done
+fi
