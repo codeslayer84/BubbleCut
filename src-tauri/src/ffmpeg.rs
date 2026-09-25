@@ -1103,6 +1103,92 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Ten seconds where each second is a distinct shade of grey, so the
+    /// second any exported frame came from can be read back off the picture.
+    fn gen_ramp(dir: &Path, secs: u32) -> String {
+        let parts: Vec<PathBuf> = (0..secs)
+            .map(|i| {
+                let level = 20 + i * 22;
+                let p = dir.join(format!("part{i}.mp4"));
+                let colour = format!("color=c=0x{0:02x}{0:02x}{0:02x}:s=320x160:d=1:r=10", level);
+                assert!(Command::new(ffmpeg())
+                    .args(["-y", "-v", "error", "-f", "lavfi", "-i", &colour,
+                           "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+                    .arg(&p).status().unwrap().success());
+                p
+            })
+            .collect();
+
+        let list = dir.join("list.txt");
+        std::fs::write(&list, parts.iter()
+            .map(|p| format!("file '{}'", p.display()))
+            .collect::<Vec<_>>().join("\n")).unwrap();
+
+        let out = dir.join("ramp.mp4");
+        assert!(Command::new(ffmpeg())
+            .args(["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i"])
+            .arg(&list)
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+                   "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+            .arg(&out).status().unwrap().success());
+        out.to_string_lossy().into_owned()
+    }
+
+    /// Which second of the ramp a frame came from.
+    fn second_at(video: &str, at: f64) -> i32 {
+        let out = Command::new(ffmpeg())
+            .args(["-v", "error", "-ss", &format!("{at}"), "-i", video,
+                   "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"])
+            .output().unwrap().stdout;
+        let mid = out[out.len() / 2] as i32;
+        ((mid - 20) as f64 / 22.0).round() as i32
+    }
+
+    /// Exporting a range must contain exactly the chosen seconds. The clip is
+    /// sliced the way the UI slices it for a selection: in and out points
+    /// moved, nothing else changed.
+    #[test]
+    fn exporting_a_selection_keeps_only_the_chosen_range() {
+        let dir = std::env::temp_dir().join(format!("bubblecut-sel-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen_ramp(&dir, 10);
+
+        // Sanity: the ramp really does step a shade per second.
+        assert_eq!(second_at(&src, 0.5), 0, "ramp second 0");
+        assert_eq!(second_at(&src, 6.5), 6, "ramp second 6");
+
+        // Selection 3s..7s of a clip that spans the whole file.
+        let clips = vec![ExportClip {
+            path: src, in_point: 3.0, out_point: 7.0,
+            yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: true,
+            stereo_mode: StereoMode::Mono, width: 320, height: 160, fps: 10.0,
+        }];
+        let out = dir.join("out.mp4");
+        let tmp = dir.join("tmp.mp4");
+        let settings = ExportSettings {
+            output: out.to_string_lossy().into_owned(),
+            encoder: "libx264".into(), width: 320, height: 160, fps: 10.0,
+            video_bitrate_mbps: 4.0, audio_bitrate_kbps: 128,
+            stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: false,
+        };
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
+        assert!((plan.total_duration - 4.0).abs() < 1e-6);
+        run(&plan, &ExportHandle::default(), |_| {}).unwrap();
+
+        let v = tmp.to_string_lossy().into_owned();
+        let info = probe(&v).unwrap();
+        assert!((info.duration - 4.0).abs() < 0.2, "duration {}", info.duration);
+
+        // The four exported seconds must be the source's 3, 4, 5 and 6.
+        for (offset, expected) in [(0.5, 3), (1.5, 4), (2.5, 5), (3.5, 6)] {
+            let got = second_at(&v, offset);
+            assert_eq!(got, expected,
+                       "at {offset}s into the export we should see source second {expected}, saw {got}");
+        }
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn export_two_clips_end_to_end() {
         let dir = std::env::temp_dir().join(format!("bubblecut-export-{}", uuid::Uuid::new_v4()));
