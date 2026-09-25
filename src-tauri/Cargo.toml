@@ -1,12 +1,12 @@
 [package]
-name = "editor360"
+name = "bubblecut"
 version = "0.1.0"
 description = "360° video editor with reliable VR export"
 authors = ["jdavidsen"]
 edition = "2021"
 
 [lib]
-name = "editor360_lib"
+name = "bubblecut_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

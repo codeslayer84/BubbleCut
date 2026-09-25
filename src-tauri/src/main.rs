@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    editor360_lib::run()
+    bubblecut_lib::run()
 }

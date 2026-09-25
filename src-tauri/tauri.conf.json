@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "360 Editor",
+  "productName": "Bubblecut",
   "version": "0.1.0",
-  "identifier": "dk.aau.editor360",
+  "identifier": "dk.aau.bubblecut",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "360 Editor",
+        "title": "Bubblecut",
         "width": 1400,
         "height": 900,
         "minWidth": 1000,

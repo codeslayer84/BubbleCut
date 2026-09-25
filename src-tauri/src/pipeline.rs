@@ -325,7 +325,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_4k() {
-        let dir = std::env::temp_dir().join(format!("editor360-bench-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-bench-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let secs = 10u32;
         let src = dir.join("a.mp4");
@@ -365,7 +365,7 @@ mod tests {
     /// through and not before.
     #[test]
     fn filters_apply_per_clip() {
-        let dir = std::env::temp_dir().join(format!("editor360-perclip-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-perclip-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = gen(&dir, 4);
         let out = dir.join("out.mp4");
@@ -412,7 +412,7 @@ mod tests {
     /// carried through and the result actually playable.
     #[test]
     fn filtered_export_produces_a_playable_greyscale_video() {
-        let dir = std::env::temp_dir().join(format!("editor360-filt-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-filt-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = gen(&dir, 2);
         let out = dir.join("out.mp4");

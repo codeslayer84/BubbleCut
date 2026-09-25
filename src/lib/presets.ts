@@ -19,7 +19,7 @@ export interface FilterPreset {
 }
 
 const FILE_NAME = "filter-presets.json";
-const STORAGE_KEY = "editor360.filterPresets";
+const STORAGE_KEY = "bubblecut.filterPresets";
 
 async function presetFile(): Promise<string> {
   const { appConfigDir, join } = await import("@tauri-apps/api/path");

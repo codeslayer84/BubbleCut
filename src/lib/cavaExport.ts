@@ -53,7 +53,7 @@ export function buildCavaCardFile(
 ): CavaCardFile {
   return {
     version: 1,
-    generator: "360 Editor",
+    generator: "Bubblecut",
     video: videoFileName,
     stereoMode,
     designWidth,

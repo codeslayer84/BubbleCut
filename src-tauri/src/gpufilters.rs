@@ -721,12 +721,12 @@ mod demo {
     use super::*;
 
     /// Writes one processed frame per filter, when pointed at a raw RGBA file
-    /// via EDITOR360_DEMO_DIR. Skipped otherwise.
+    /// via BUBBLECUT_DEMO_DIR. Skipped otherwise.
     #[test]
     fn render_demo_frames() {
-        let Ok(dir) = std::env::var("EDITOR360_DEMO_DIR") else { return };
-        let w: u32 = std::env::var("EDITOR360_DEMO_W").unwrap().parse().unwrap();
-        let h: u32 = std::env::var("EDITOR360_DEMO_H").unwrap().parse().unwrap();
+        let Ok(dir) = std::env::var("BUBBLECUT_DEMO_DIR") else { return };
+        let w: u32 = std::env::var("BUBBLECUT_DEMO_W").unwrap().parse().unwrap();
+        let h: u32 = std::env::var("BUBBLECUT_DEMO_H").unwrap().parse().unwrap();
         for name in available_filters() {
             let spec = FilterSpec { name: name.clone(), params: HashMap::new() };
             let safe = name.replace(' ', "_");

@@ -66,7 +66,7 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <div className="brand">360 Editor</div>
+        <div className="brand">Bubblecut</div>
         <nav>
           {(["edit", "text", "filters", "export", "tools"] as RightTab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
@@ -76,7 +76,7 @@ export default function App() {
           ))}
         </nav>
         <span className="spacer" />
-        <button onClick={() => setShowAbout(true)} title="About 360 Editor">About</button>
+        <button onClick={() => setShowAbout(true)} title="About Bubblecut">About</button>
         {isTauri && (
           <div className="project">
             <span className="hint">{projectPath ? projectPath.split("/").pop() : "Untitled"}{dirty ? " •" : ""}</span>

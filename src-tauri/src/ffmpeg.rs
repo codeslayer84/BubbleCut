@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FfError {
-    #[error("{0} not found. Install ffmpeg (e.g. `brew install ffmpeg`) or set EDITOR360_FFMPEG_DIR.")]
+    #[error("{0} not found. Install ffmpeg (e.g. `brew install ffmpeg`) or set BUBBLECUT_FFMPEG_DIR.")]
     NotFound(&'static str),
     #[error("ffprobe failed: {0}")]
     Probe(String),
@@ -43,7 +43,7 @@ pub fn host_arch() -> &'static str {
 /// encoders and is roughly 20x slower, so a native build always wins over an
 /// emulated one no matter where it sits on PATH.
 pub fn find_binary(name: &'static str) -> Result<PathBuf, FfError> {
-    if let Ok(dir) = std::env::var("EDITOR360_FFMPEG_DIR") {
+    if let Ok(dir) = std::env::var("BUBBLECUT_FFMPEG_DIR") {
         let p = Path::new(&dir).join(name);
         if p.is_file() {
             return Ok(p);
@@ -937,7 +937,7 @@ mod tests {
 
     #[test]
     fn text_card_is_burned_in_only_during_its_time_range() {
-        let dir = std::env::temp_dir().join(format!("editor360-card-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-card-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = gen_plain(&dir, "a.mp4", 6);
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
@@ -1001,7 +1001,7 @@ mod tests {
     /// centred on its yaw/pitch and spanning `width_deg` of the sphere.
     #[test]
     fn card_geometry_matches_preview_maths() {
-        let dir = std::env::temp_dir().join(format!("editor360-geom-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-geom-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = gen_plain(&dir, "a.mp4", 3);
         // Card canvas is 400x200 with the red bar filling 300x80 centred in it,
@@ -1061,7 +1061,7 @@ mod tests {
 
     #[test]
     fn card_fades_up_and_down() {
-        let dir = std::env::temp_dir().join(format!("editor360-fade-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-fade-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = gen_plain(&dir, "a.mp4", 8);
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
@@ -1105,7 +1105,7 @@ mod tests {
 
     #[test]
     fn export_two_clips_end_to_end() {
-        let dir = std::env::temp_dir().join(format!("editor360-export-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-export-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = gen(&dir, "a.mp4", true, 4);
         let b = gen(&dir, "b.mp4", false, 4);

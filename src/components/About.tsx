@@ -5,7 +5,7 @@ const VERSION = "0.1.0";
 
 /** Ten lines on what this is, also used as the app's description. */
 export const DESCRIPTION = [
-  "360 Editor is a desktop editor for 360° video, built for research recordings",
+  "Bubblecut is a desktop editor for 360° video, built for research recordings",
   "rather than for broadcast. It imports equirectangular footage, mono or stereo,",
   "and previews it as a real sphere you can look around in.",
   "Clips can be trimmed, split and reordered, and each one can be turned so the",
@@ -33,7 +33,7 @@ export function About({ onClose }: { onClose: () => void }) {
         <div className="about-head">
           <img src="/app-icon.png" alt="" width={72} height={72} />
           <div>
-            <h2>360 Editor</h2>
+            <h2>Bubblecut</h2>
             <div className="hint">Version {VERSION}</div>
           </div>
         </div>

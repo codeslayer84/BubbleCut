@@ -1,4 +1,4 @@
-# 360 Editor
+# Bubblecut
 
 A desktop editor for 360° (equirectangular) video, built for research
 recordings rather than for broadcast, with one-click export that plays
@@ -80,7 +80,7 @@ npm run tauri icon icon/icon.png
   about 20x slower; the app prefers a native binary and warns if only an
   emulated one is found.
 - `ffmpeg` + `ffprobe` on PATH, or in `/opt/homebrew/bin`, `/usr/local/bin`,
-  or the directory named by `EDITOR360_FFMPEG_DIR`
+  or the directory named by `BUBBLECUT_FFMPEG_DIR`
 - Node 22 (`.nvmrc`), Rust stable
 
 ## Run

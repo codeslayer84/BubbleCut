@@ -276,8 +276,8 @@ pub fn run() {
         .setup(|app| {
             // Surface the ffmpeg location in the log for troubleshooting.
             match ffmpeg::version() {
-                Ok(v) => eprintln!("[360editor] {v}"),
-                Err(e) => eprintln!("[360editor] {e}"),
+                Ok(v) => eprintln!("[bubblecut] {v}"),
+                Err(e) => eprintln!("[bubblecut] {e}"),
             }
             let _ = app;
             Ok(())

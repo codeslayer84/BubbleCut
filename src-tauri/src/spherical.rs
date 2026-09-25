@@ -158,7 +158,7 @@ fn build_st3d(stereo: &StereoMode) -> MpBox {
 }
 
 fn build_sv3d() -> MpBox {
-    let mut svhd = b"360 Editor".to_vec();
+    let mut svhd = b"Bubblecut".to_vec();
     svhd.push(0);
     let prhd = full_box(b"prhd", &[0u8; 12]); // pose yaw/pitch/roll = 0 (16.16 fixed)
     let equi = full_box(b"equi", &[0u8; 16]); // full-frame equirect bounds
@@ -177,7 +177,7 @@ fn build_v1_uuid(stereo: &StereoMode) -> MpBox {
 xmlns:GSpherical=\"http://ns.google.com/videos/1.0/spherical/\">\
 <GSpherical:Spherical>true</GSpherical:Spherical>\
 <GSpherical:Stitched>true</GSpherical:Stitched>\
-<GSpherical:StitchingSoftware>360 Editor</GSpherical:StitchingSoftware>\
+<GSpherical:StitchingSoftware>Bubblecut</GSpherical:StitchingSoftware>\
 <GSpherical:ProjectionType>equirectangular</GSpherical:ProjectionType>\
 {stereo_xml}</rdf:SphericalVideo>"
     );
@@ -498,7 +498,7 @@ mod tests {
     }
 
     fn run_case(faststart: bool, stereo: StereoMode) {
-        let dir = std::env::temp_dir().join(format!("editor360-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("bubblecut-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = make_clip(&dir, "src.mp4", faststart);
         let dst = dir.join("tagged.mp4");
