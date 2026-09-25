@@ -80,6 +80,24 @@ GPL-3.0-or-later, with one open question: the 360mash-derived filters are not
 yet cleared for redistribution. See [THIRD-PARTY.md](THIRD-PARTY.md) before
 publishing. Cite the tool with [CITATION.cff](CITATION.cff).
 
+## Signing
+
+Builds are ad-hoc signed, which is a valid signature but not a trusted one:
+macOS reports an unidentified developer and the user opens it with right-click
+→ Open. That is as far as it goes without a certificate.
+
+For a build that opens on a double-click you need the Apple Developer Program
+and a "Developer ID Application" certificate, then both signing *and*
+notarisation — signing alone still warns. Copy `.env.example` to `.env`, fill
+it in, and build with `scripts/build-signed.sh`. `.env` is gitignored; for CI
+the same values go in the repository's Actions secrets, never in the repo.
+
+Check what certificates you have with:
+
+```bash
+security find-identity -v -p codesigning
+```
+
 ## Requirements
 
 - macOS (Linux/Windows should work but are untested)

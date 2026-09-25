@@ -32,3 +32,10 @@ icon/*.raw
 
 # The clone of the GitHub repo, kept out of the project tree
 BubbleCut/
+
+# Signing credentials — never commit these
+.env
+.env.local
+*.p12
+*.p8
+*.pfx
