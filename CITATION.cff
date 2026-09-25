@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+title: "Bubblecut: a 360° video editor for research recordings"
+message: "If you use this software in your research, please cite it."
+type: software
+authors:
+  - family-names: Davidsen
+    given-names: Jacob
+    affiliation: "Big Soft Video, Aalborg University"
+    # Add your ORCID here, e.g.
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/codeslayer84/BubbleCut"
+url: "https://www.bigvideo.aau.dk/"
+abstract: >-
+  Bubblecut is a desktop editor for 360-degree video, built for research
+  recordings rather than for broadcast. It imports equirectangular footage,
+  mono or stereo, and previews it as a sphere the analyst can look around in.
+  Clips can be trimmed, split and reordered, and each can be reoriented so the
+  viewer starts facing whatever matters in the room. Text cards can be placed
+  anywhere in the sphere and timed on the timeline, then either burned into the
+  picture or exported as a sidecar so they become objects that can be grabbed
+  and moved in CAVA360VR. Painterly and anonymising filters run on the GPU, per
+  clip, and can be saved as presets. FFmpeg performs the decoding and the
+  hardware-accelerated encoding, and exported files carry Spherical Video V2
+  metadata so they play correctly in headsets.
+keywords:
+  - 360-degree video
+  - video analysis
+  - qualitative research
+  - virtual reality
+  - anonymisation
+  - equirectangular
+license: GPL-3.0-or-later
+version: 0.1.0
+date-released: "2026-09-25"

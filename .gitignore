@@ -29,3 +29,6 @@ src-tauri/gen/schemas/
 
 # Intermediate raster for the icon generator
 icon/*.raw
+
+# The clone of the GitHub repo, kept out of the project tree
+BubbleCut/

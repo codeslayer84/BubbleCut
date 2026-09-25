@@ -74,6 +74,12 @@ cp icon/icon.png public/app-icon.png
 npm run tauri icon icon/icon.png
 ```
 
+## Licence
+
+GPL-3.0-or-later, with one open question: the 360mash-derived filters are not
+yet cleared for redistribution. See [THIRD-PARTY.md](THIRD-PARTY.md) before
+publishing. Cite the tool with [CITATION.cff](CITATION.cff).
+
 ## Requirements
 
 - macOS (Linux/Windows should work but are untested)
