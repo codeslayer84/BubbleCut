@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws the app icon and writes raw RGBA for ffmpeg to encode.
+"""Draws the Bubblecut icon and writes raw RGBA for ffmpeg to encode.
 
 Kept as a script rather than a checked-in binary so the icon can be adjusted
 and regenerated. No image library is installed on this machine, so the pixels
@@ -34,17 +34,6 @@ def over(dst, src, alpha):
             lerp(dst[2], src[2], alpha))
 
 
-def ellipse_distance(x, y, cx, cy, rx, ry):
-    """First-order distance to an ellipse outline; good enough for a stroke."""
-    dx = (x - cx) / rx
-    dy = (y - cy) / ry
-    f = dx * dx + dy * dy - 1.0
-    gx = 2.0 * (x - cx) / (rx * rx)
-    gy = 2.0 * (y - cy) / (ry * ry)
-    grad = math.hypot(gx, gy)
-    return f / grad if grad > 1e-9 else 1e9
-
-
 def in_triangle(px, py, a, b, c):
     def side(p, q, r):
         return (p[0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[1] - r[1])
@@ -55,60 +44,95 @@ def in_triangle(px, py, a, b, c):
     return not (neg and pos)
 
 
+def smoothstep(a, b, x):
+    if b == a:
+        return 0.0 if x < a else 1.0
+    t = min(max((x - a) / (b - a), 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+# Soap-film iridescence: the colour a bubble shows depends on where you look
+# at it, so the hue is taken round the bubble rather than being flat.
+FILM = [
+    (0.00, (124, 196, 255)),
+    (0.28, (111, 242, 208)),
+    (0.50, (255, 226, 122)),
+    (0.72, (255, 154, 224)),
+    (1.00, (124, 196, 255)),
+]
+
+
+def film_colour(t):
+    t = t % 1.0
+    for i in range(len(FILM) - 1):
+        t0, c0 = FILM[i]
+        t1, c1 = FILM[i + 1]
+        if t0 <= t <= t1:
+            return mix(c0, c1, (t - t0) / (t1 - t0))
+    return FILM[-1][1]
+
+
+def bubble(x, y, bx, by, br):
+    """Colour and coverage of one bubble, or None outside it."""
+    dx = x - bx
+    dy = y - by
+    d = math.hypot(dx, dy) / br
+    if d > 1.0:
+        return None
+
+    ang = math.atan2(dy, dx)
+    col = film_colour(ang / (2.0 * math.pi) + 0.5 + 0.35 * d)
+
+    # A bubble is a thin film: you see almost nothing through the middle and
+    # a bright ring where the film is edge-on.
+    rim = smoothstep(0.55, 1.0, d)
+    col = mix(col, (255, 255, 255), 0.45 * rim)
+    # Enough film to carry its colour against a dark plate; a physically
+    # fainter bubble just turns to mud at icon sizes.
+    alpha = 0.34 + 0.62 * rim
+
+    # The highlight is what actually makes it read as a bubble.
+    hd = math.hypot(x - (bx - 0.42 * br), y - (by - 0.46 * br)) / (0.30 * br)
+    if hd < 1.0:
+        k = (1.0 - hd) ** 2
+        col = mix(col, (255, 255, 255), 0.90 * k)
+        alpha += (1.0 - alpha) * 0.85 * k
+    gd = math.hypot(x - (bx + 0.40 * br), y - (by + 0.44 * br)) / (0.17 * br)
+    if gd < 1.0:
+        k = (1.0 - gd) ** 2
+        col = mix(col, (255, 255, 255), 0.70 * k)
+        alpha += (1.0 - alpha) * 0.55 * k
+
+    return col, min(alpha, 1.0)
+
+
 def sample(x, y, S):
     """Colour and alpha at one sample point, or None outside the plate."""
-    # Rounded-square plate.
     r = S * 0.225
     half = S / 2.0
     qx = abs(x - half) - (half - r)
     qy = abs(y - half) - (half - r)
-    outside = math.hypot(max(qx, 0.0), max(qy, 0.0)) - r
-    if outside > 0.0:
+    if math.hypot(max(qx, 0.0), max(qy, 0.0)) - r > 0.0:
         return None
 
     col = mix(PLATE_TOP, PLATE_BOTTOM, y / S)
 
-    cx = cy = half
-    R = S * 0.315
-    rim_half = S * 0.009
-    line_half = S * 0.008
+    # Back to front, so the overlaps read correctly.
+    for bx, by, br in (
+        (0.255 * S, 0.735 * S, 0.105 * S),
+        (0.720 * S, 0.275 * S, 0.135 * S),
+        (0.445 * S, 0.470 * S, 0.300 * S),
+    ):
+        hit = bubble(x, y, bx, by, br)
+        if hit is not None:
+            col = over(col, hit[0], hit[1])
 
-    d_centre = math.hypot(x - cx, y - cy)
-    if d_centre <= R + rim_half:
-        if d_centre <= R:
-            t = ((x - (cx - R)) + (y - (cy - R))) / (4.0 * R)
-            col = mix(SPHERE_A, SPHERE_B, min(max(t, 0.0), 1.0))
-
-            # Latitudes, flattened by perspective.
-            on_line = False
-            for lat in (-40.0, 0.0, 40.0):
-                rad = math.radians(lat)
-                ey = cy + R * math.sin(rad)
-                erx = R * math.cos(rad)
-                ery = max(R * 0.20 * math.cos(rad), S * 0.012)
-                if abs(ellipse_distance(x, y, cx, ey, erx, ery)) <= line_half:
-                    on_line = True
-                    break
-            # Meridians, narrowing towards the centre.
-            if not on_line:
-                for f in (1.0, 0.55):
-                    if abs(ellipse_distance(x, y, cx, cy, R * f, R)) <= line_half:
-                        on_line = True
-                        break
-            if not on_line and abs(x - cx) <= line_half:
-                on_line = True
-            if on_line:
-                col = over(col, (255, 255, 255), 0.5)
-
-        # Rim.
-        if abs(d_centre - R) <= rim_half:
-            col = over(col, (255, 255, 255), 0.75)
-
-    # Play badge, so it reads as video rather than a globe.
-    pr = R * 0.52
-    px = cx + R * 0.62
-    py = cy + R * 0.62
-    if math.hypot(x - px, y - py) <= pr:
+    # Play badge, so it reads as video rather than decoration.
+    pr = S * 0.150
+    px = S * 0.715
+    py = S * 0.715
+    pd = math.hypot(x - px, y - py)
+    if pd <= pr:
         col = (255, 255, 255)
         t = pr * 0.52
         a = (px - t * 0.55, py - t)
