@@ -82,9 +82,14 @@ publishing. Cite the tool with [CITATION.cff](CITATION.cff).
 
 ## Signing
 
-Builds are ad-hoc signed, which is a valid signature but not a trusted one:
-macOS reports an unidentified developer and the user opens it with right-click
-→ Open. That is as far as it goes without a certificate.
+Builds are ad-hoc signed: a valid signature, but not a trusted one. macOS
+blocks the first launch with "Apple could not verify Bubblecut is free of
+malware". Open it from **System Settings → Privacy & Security → Open Anyway**,
+or clear the quarantine flag with
+`xattr -dr com.apple.quarantine /Applications/Bubblecut.app`.
+
+Control-clicking and choosing Open does not help; Apple removed that bypass
+for unnotarised apps in macOS 15. Only notarisation removes the prompt.
 
 For a build that opens on a double-click you need the Apple Developer Program
 and a "Developer ID Application" certificate, then both signing *and*
