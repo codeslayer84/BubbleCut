@@ -41,7 +41,11 @@
     ],
     "macOS": {
       "signingIdentity": "-"
-    }
+    },
+    "copyright": "\u00a9 2026 Jacob Davidsen \u00b7 Big Soft Video \u00b7 Aalborg University",
+    "category": "public.app-category.video",
+    "shortDescription": "360\u00b0 video editor for research recordings",
+    "longDescription": "Edits 360\u00b0 video: a sphere preview, per-clip reorientation, text cards that can be burned in or exported for CAVA360VR, and GPU filters."
   },
   "mainBinaryName": "Bubblecut"
 }
