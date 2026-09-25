@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { ffmpegInfo, isTauri, type FfmpegInfo } from "../lib/tauri";
+// Imported rather than referenced by path so Vite fingerprints the filename.
+// A fixed /app-icon.png stays in the webview's cache across a redesign.
+import appIcon from "../assets/app-icon.png";
 
 const VERSION = "0.1.0";
 
@@ -31,7 +34,7 @@ export function About({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" onPointerDown={onClose}>
       <div className="modal about" onPointerDown={(e) => e.stopPropagation()}>
         <div className="about-head">
-          <img src="/app-icon.png" alt="" width={72} height={72} />
+          <img src={appIcon} alt="" width={72} height={72} />
           <div>
             <h2>Bubblecut</h2>
             <div className="hint">Version {VERSION}</div>

@@ -1,0 +1,84 @@
+name: Release
+
+# Windows bundles cannot be produced on macOS — Tauri needs MSVC and WebView2
+# on an actual Windows machine — so each platform is built on its own runner
+# and the results are attached to one GitHub Release.
+#
+# Push a tag to publish:
+#   git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            name: "macOS (Apple silicon)"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            name: "macOS (Intel)"
+          - platform: windows-latest
+            args: ""
+            name: "Windows"
+
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and attach to the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Bubblecut ${{ github.ref_name }}"
+          releaseBody: |
+            Desktop builds of Bubblecut.
+
+            **FFmpeg is required and is not bundled.** Install it before running:
+
+            - macOS: `brew install ffmpeg`
+            - Windows: `winget install Gyan.FFmpeg`
+
+            On Apple silicon make sure the ffmpeg you install is a native arm64
+            build. An Intel build under Rosetta cannot reach the hardware video
+            encoder and exports roughly 20x slower; the app warns you if it
+            finds one.
+
+            The macOS builds are unsigned, so the first launch needs
+            right-click → Open, or:
+            `xattr -dr com.apple.quarantine "/Applications/Bubblecut.app"`
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
