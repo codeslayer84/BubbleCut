@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
+import { selectionDuration } from "../lib/selection";
 import {
-  cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, startExport,
-  writeTextFile, type FfmpegInfo,
+  cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, runExport,
+  startExport, writeTextFile, type FfmpegInfo,
 } from "../lib/tauri";
 import type { ExportDone, Progress, StereoMode } from "../lib/types";
 import { buildCavaCardFile, cavaSidecarPath } from "../lib/cavaExport";
@@ -75,6 +76,24 @@ export function ExportPanel() {
   const total = timelineDuration(clips);
   const activeCards = cards.filter((c) => c.end > c.start && c.text.trim() !== "").length;
   const filterCount = clips.reduce((n, c) => n + c.filters.length, 0);
+  const selection = useStore((s) => s.selection);
+  const selectedIds = useStore((s) => s.selectedClipIds);
+  const chosenClips = clips.filter((c) => selectedIds.includes(c.id));
+  const canScopeClips = chosenClips.length > 0;
+
+  // What gets exported, and whether each clip becomes its own file.
+  const [scope, setScope] = useState<"all" | "range" | "clips">("all");
+  const [separateFiles, setSeparateFiles] = useState(false);
+  const [batch, setBatch] = useState<{ index: number; of: number } | null>(null);
+
+  const effectiveScope = scope === "range" && !selection ? "all"
+    : scope === "clips" && !canScopeClips ? "all"
+    : scope;
+  const activeSelection = effectiveScope === "range" ? selection : null;
+  const scopedClips = effectiveScope === "clips" ? chosenClips : clips;
+  const exportLength = effectiveScope === "clips"
+    ? chosenClips.reduce((n, c) => n + (c.outPoint - c.inPoint), 0)
+    : selectionDuration(clips, activeSelection);
   const running = progress !== null;
   const canExport = isTauri && clips.length > 0 && !!settings.output && !running;
 
@@ -99,7 +118,29 @@ export function ExportPanel() {
   const run = async () => {
     setDone(null); setError(null);
     setProgress({ percent: 0, outTime: 0, speed: "", fps: 0, stage: "starting" });
-    try { await startExport(clips, media, cards, settings); } catch (e) { setError(String(e)); setProgress(null); }
+    try {
+      if (effectiveScope === "clips" && separateFiles) {
+        // One file per clip, run one at a time: the backend refuses a second
+        // export while one is in flight.
+        const dot = settings.output.lastIndexOf(".");
+        const stem = dot > 0 ? settings.output.slice(0, dot) : settings.output;
+        const ext = dot > 0 ? settings.output.slice(dot) : ".mp4";
+        let last: ExportDone | null = null;
+        for (let i = 0; i < chosenClips.length; i++) {
+          setBatch({ index: i + 1, of: chosenClips.length });
+          const numbered = `${stem}_${String(i + 1).padStart(2, "0")}${ext}`;
+          last = await runExport(
+            [chosenClips[i]], media, cards,
+            { ...settings, output: numbered }, null, setProgress,
+          );
+        }
+        setBatch(null);
+        if (last) setDone(last);
+        setProgress(null);
+      } else {
+        await startExport(scopedClips, media, cards, settings, activeSelection);
+      }
+    } catch (e) { setError(String(e)); setProgress(null); setBatch(null); }
   };
 
   const eta = progress && progress.percent > 1 && progress.speed
@@ -200,17 +241,60 @@ export function ExportPanel() {
       )}
       {sidecar && <div className="hint">Wrote {sidecar}</div>}
 
+      <label className="field">
+        <span>What to export</span>
+        <select value={effectiveScope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+          <option value="all">Whole timeline ({fmtTime(total)})</option>
+          <option value="range" disabled={!selection}>
+            {selection
+              ? `Time selection (${fmtTime(selection.start)}–${fmtTime(selection.end)})`
+              : "Time selection — drag the ruler first"}
+          </option>
+          <option value="clips" disabled={!canScopeClips}>
+            {canScopeClips
+              ? `Selected clips (${chosenClips.length})`
+              : "Selected clips — Cmd-click clips first"}
+          </option>
+        </select>
+      </label>
+
+      {effectiveScope === "clips" && (
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={separateFiles}
+            onChange={(e) => setSeparateFiles(e.target.checked)}
+          />
+          A separate file per clip
+        </label>
+      )}
+
+      {effectiveScope === "clips" && separateFiles && (
+        <div className="hint sel-note">
+          {chosenClips.length} files, numbered from the name above, e.g.{" "}
+          <span className="mono">{(settings.output.replace(/\.[^.]+$/, "") || "output") + "_01.mp4"}</span>.
+        </div>
+      )}
+      {effectiveScope === "range" && selection && (
+        <div className="hint sel-note">
+          Just <b>{fmtTime(selection.start)} – {fmtTime(selection.end)}</b> of {fmtTime(total)}.
+        </div>
+      )}
+
       <div className="row">
         <button className="primary big" onClick={run} disabled={!canExport}>
           {running
             ? "Exporting…"
-            : `Export ${fmtTime(total)} · ${clips.length} clip${clips.length === 1 ? "" : "s"}` +
+            : `Export ${fmtTime(exportLength)} · ${scopedClips.length} clip${scopedClips.length === 1 ? "" : "s"}` +
               (activeCards && settings.burnCards ? ` · ${activeCards} card${activeCards === 1 ? "" : "s"}` : "") +
               (filterCount ? ` · ${filterCount} filter${filterCount === 1 ? "" : "s"}` : "")}
         </button>
         {running && <button className="danger" onClick={() => cancelExport()}>Cancel</button>}
       </div>
 
+      {batch && (
+        <div className="hint">Clip {batch.index} of {batch.of}…</div>
+      )}
       {progress && (
         <div className="progress">
           <div className="bar"><div style={{ width: `${progress.percent}%` }} /></div>

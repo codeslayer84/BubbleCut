@@ -54,11 +54,15 @@ interface State {
   clips: Clip[];
   cards: TextCard[];
   previewFilters: boolean;
+  /** Timeline range to export, in timeline seconds. Null exports everything. */
+  selection: { start: number; end: number } | null;
   /** Which panel the right sidebar is showing. */
   rightTab: RightTab;
   /** Saved filter chains, shared across projects. */
   presets: FilterPreset[];
   selectedClipId: string | null;
+  /** All clips picked out for export. The last one is selectedClipId. */
+  selectedClipIds: string[];
   selectedCardId: string | null;
   playhead: number;
   playing: boolean;
@@ -76,6 +80,7 @@ interface State {
   moveFilter: (clipId: string, id: string, dir: -1 | 1) => void;
   copyFiltersToAllClips: (clipId: string) => void;
   setPreviewFilters: (on: boolean) => void;
+  setSelection: (range: { start: number; end: number } | null) => void;
   setRightTab: (tab: RightTab) => void;
   refreshPresets: () => Promise<void>;
   savePresetFromClip: (clipId: string, name: string) => Promise<string | null>;
@@ -90,6 +95,8 @@ interface State {
   moveClip: (id: string, dir: -1 | 1) => void;
   splitAtPlayhead: () => void;
   selectClip: (id: string | null) => void;
+  toggleClipSelected: (id: string) => void;
+  selectClipRange: (id: string) => void;
   setPlayhead: (t: number) => void;
   setPlaying: (p: boolean) => void;
   setView: (v: Partial<View>) => void;
@@ -104,9 +111,11 @@ export const useStore = create<State>((set, get) => ({
   clips: [],
   cards: [],
   previewFilters: true,
+  selection: null,
   rightTab: "edit",
   presets: [],
   selectedClipId: null,
+  selectedClipIds: [],
   selectedCardId: null,
   playhead: 0,
   playing: false,
@@ -205,6 +214,14 @@ export const useStore = create<State>((set, get) => ({
       };
     }),
   setPreviewFilters: (previewFilters) => set({ previewFilters }),
+  setSelection: (selection) =>
+    set(() => {
+      if (!selection) return { selection: null };
+      // Keep it ordered and non-empty however it was dragged.
+      const start = Math.max(0, Math.min(selection.start, selection.end));
+      const end = Math.max(selection.start, selection.end);
+      return { selection: end - start < 0.05 ? null : { start, end } };
+    }),
   setRightTab: (rightTab) => set({ rightTab }),
 
   refreshPresets: async () => set({ presets: await loadPresets() }),
@@ -275,6 +292,7 @@ export const useStore = create<State>((set, get) => ({
   removeClip: (id) =>
     set((s) => ({
       clips: s.clips.filter((c) => c.id !== id),
+      selectedClipIds: s.selectedClipIds.filter((x) => x !== id),
       selectedClipId: s.selectedClipId === id ? null : s.selectedClipId,
       dirty: true,
     })),
@@ -307,7 +325,26 @@ export const useStore = create<State>((set, get) => ({
       }
       return {};
     }),
-  selectClip: (id) => set({ selectedClipId: id }),
+  selectClip: (id) => set({ selectedClipId: id, selectedClipIds: id ? [id] : [] }),
+
+  // Cmd- or Ctrl-click: add or remove one clip.
+  toggleClipSelected: (id) =>
+    set((s) => {
+      const has = s.selectedClipIds.includes(id);
+      const ids = has ? s.selectedClipIds.filter((x) => x !== id) : [...s.selectedClipIds, id];
+      return { selectedClipIds: ids, selectedClipId: ids.length ? ids[ids.length - 1] : null };
+    }),
+
+  // Shift-click: everything between the current clip and this one.
+  selectClipRange: (id) =>
+    set((s) => {
+      const order = s.clips.map((c) => c.id);
+      const to = order.indexOf(id);
+      const anchor = s.selectedClipId ? order.indexOf(s.selectedClipId) : to;
+      if (to < 0 || anchor < 0) return {};
+      const [lo, hi] = anchor <= to ? [anchor, to] : [to, anchor];
+      return { selectedClipIds: order.slice(lo, hi + 1), selectedClipId: id };
+    }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (playing) => set({ playing }),
   setView: (v) => set((s) => ({ view: { ...s.view, ...v } })),

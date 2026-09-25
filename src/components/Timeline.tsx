@@ -10,11 +10,14 @@ export function Timeline() {
   const playhead = useStore((s) => s.playhead);
   const playing = useStore((s) => s.playing);
   const selectedId = useStore((s) => s.selectedClipId);
+  const selectedIds = useStore((s) => s.selectedClipIds);
   const cards = useStore((s) => s.cards);
   const selectedCardId = useStore((s) => s.selectedCardId);
+  const selection = useStore((s) => s.selection);
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
-    selectCard, updateCard, setRightTab,
+    selectCard, updateCard, setRightTab, setSelection,
+    toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
   const [pxPerSec, setPxPerSec] = useState(20);
@@ -109,6 +112,44 @@ export function Timeline() {
     }
   };
 
+  // Dragging along the ruler marks the part of the timeline to export.
+  const startSelectionDrag = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setPlaying(false);
+    const anchor = timeAt(e.clientX);
+    setSelection(null);
+    const move = (ev: PointerEvent) => {
+      const t = timeAt(ev.clientX);
+      setSelection({ start: Math.min(anchor, t), end: Math.max(anchor, t) });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const dragSelectionEdge = (e: React.PointerEvent, edge: "start" | "end") => {
+    e.stopPropagation();
+    e.preventDefault();
+    const current = useStore.getState().selection;
+    if (!current) return;
+    const move = (ev: PointerEvent) => {
+      const t = timeAt(ev.clientX);
+      const next = useStore.getState().selection;
+      if (!next) return;
+      setSelection(edge === "start" ? { start: t, end: next.end } : { start: next.start, end: t });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   // Cards that overlap in time go on separate rows, so each one stays
   // readable and can be grabbed without fighting its neighbour for the click.
   const CARD_ROW_H = 26;
@@ -147,6 +188,32 @@ export function Timeline() {
         <span className="time">{fmtTime(playhead)} / {fmtTime(total)}</span>
         <span className="spacer" />
         <button onClick={splitAtPlayhead} disabled={!clips.length} title="S">Split</button>
+        <span className="sep" />
+        <button
+          onClick={() => setSelection({ start: playhead, end: selection?.end ?? total })}
+          disabled={!clips.length}
+          title="Start the export selection here"
+        >
+          [
+        </button>
+        <button
+          onClick={() => setSelection({ start: selection?.start ?? 0, end: playhead })}
+          disabled={!clips.length}
+          title="End the export selection here"
+        >
+          ]
+        </button>
+        {selectedIds.length > 1 && (
+          <span className="hint sel-readout">{selectedIds.length} clips selected</span>
+        )}
+        {selection && (
+          <>
+            <span className="hint sel-readout">
+              {fmtTime(selection.start)}–{fmtTime(selection.end)}
+            </span>
+            <button onClick={() => setSelection(null)} title="Clear the selection">Clear</button>
+          </>
+        )}
         <button onClick={() => selectedId && moveClip(selectedId, -1)} disabled={!selectedId} title="Move earlier">◀</button>
         <button onClick={() => selectedId && moveClip(selectedId, 1)} disabled={!selectedId} title="Move later">▶</button>
         <button onClick={() => selectedId && removeClip(selectedId)} disabled={!selectedId} title="Delete" className="danger">
@@ -160,7 +227,7 @@ export function Timeline() {
       </div>
       <div className="track-scroll" ref={trackRef} onPointerDown={onTrackPointerDown}>
         <div className="track" style={{ width: Math.max(total * pxPerSec + 40, 100) }}>
-          <div className="ruler">
+          <div className="ruler" onPointerDown={startSelectionDrag} title="Drag to choose what to export">
             {ticks.map((t) => (
               <span key={t} className="tick" style={{ left: t * pxPerSec }}>{fmtTime(t).replace(/\.\d+$/, "")}</span>
             ))}
@@ -175,9 +242,31 @@ export function Timeline() {
               return (
                 <div
                   key={c.id}
-                  className={"clip" + (c.id === selectedId ? " selected" : "")}
+                  className={
+                    "clip" +
+                    (c.id === selectedId ? " selected" : "") +
+                    (selectedIds.includes(c.id) ? " multi" : "")
+                  }
                   style={{ left, width: Math.max(w, 2) }}
-                  onPointerDown={(e) => { e.stopPropagation(); selectClip(c.id); setPlaying(false); setPlayhead(left / pxPerSec + Math.min(clipLength(c), Math.max(0, (e.clientX - trackRef.current!.getBoundingClientRect().left + trackRef.current!.scrollLeft - left) / pxPerSec))); }}
+                  title="Cmd-click to add to the selection, Shift-click for a range"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    setPlaying(false);
+                    // Cmd/Ctrl adds or removes, Shift extends, a plain click
+                    // selects just this one and moves the playhead.
+                    if (e.metaKey || e.ctrlKey) {
+                      toggleClipSelected(c.id);
+                      return;
+                    }
+                    if (e.shiftKey) {
+                      selectClipRange(c.id);
+                      return;
+                    }
+                    selectClip(c.id);
+                    const rect = trackRef.current!.getBoundingClientRect();
+                    const within = (e.clientX - rect.left + trackRef.current!.scrollLeft - left) / pxPerSec;
+                    setPlayhead(left / pxPerSec + Math.min(clipLength(c), Math.max(0, within)));
+                  }}
                 >
                   <div className="clip-handle left" onPointerDown={(e) => startTrim(e, c.id, "in")} />
                   <div className="clip-body">
@@ -242,6 +331,30 @@ export function Timeline() {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {selection && (
+            <div className="selection-layer">
+              {/* Everything outside the selection is dimmed, so what will be
+                  exported is obvious at a glance. */}
+              <div className="sel-dim" style={{ left: 0, width: selection.start * pxPerSec }} />
+              <div
+                className="sel-dim"
+                style={{
+                  left: selection.end * pxPerSec,
+                  width: Math.max(0, (total - selection.end) * pxPerSec),
+                }}
+              />
+              <div
+                className="sel-band"
+                style={{
+                  left: selection.start * pxPerSec,
+                  width: Math.max(2, (selection.end - selection.start) * pxPerSec),
+                }}
+              >
+                <div className="sel-handle left" onPointerDown={(e) => dragSelectionEdge(e, "start")} />
+                <div className="sel-handle right" onPointerDown={(e) => dragSelectionEdge(e, "end")} />
+              </div>
             </div>
           )}
           <div className="playhead" style={{ left: playhead * pxPerSec }} />

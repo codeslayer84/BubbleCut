@@ -18,6 +18,9 @@ decode/encode step.
 - 360° preview: drag to look around, scroll to zoom. Stereo sources preview
   the left/top eye.
 - Timeline: trim (drag clip edges or `I`/`O`), split (`S`), reorder, remove.
+  Drag along the ruler to mark a range, or Cmd-click and Shift-click clips to
+  pick several; the Export panel can then export the whole timeline, just that
+  range, those clips joined, or each clip as its own numbered file.
   Text cards appear on their own lane beneath the clips, where they can be
   dragged along the timeline or have either end pulled. Overlapping cards
   stack onto separate rows, and the darkened wedges show their fades.
@@ -138,6 +141,8 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
 | I / O | Set in / out point at playhead |
 | S | Split at playhead |
 | Delete | Remove selected clip |
+| Cmd-click | Add or remove a clip from the selection |
+| Shift-click | Select a run of clips |
 
 ## How export works
 
@@ -158,6 +163,17 @@ Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
    chunk offsets, streaming the rest of the file through unchanged.
 5. `spherical::check` + `ffprobe` confirm the result; the ffmpeg command is
    shown in the UI so you can reproduce it by hand.
+
+## Exporting part of the timeline
+
+A range is applied by slicing the clips themselves rather than exporting
+everything and trimming the result: ffmpeg then seeks straight to each piece
+instead of decoding footage that is about to be discarded, and the rest of the
+pipeline carries on unchanged because it only sees a shorter clip list. Cards
+are shifted to the new zero and dropped if they fall outside.
+
+Exporting each clip to its own file runs the exports one after another; the
+backend refuses a second export while one is in flight.
 
 ## How filters are applied
 
