@@ -45,7 +45,7 @@ export function About({ onClose }: { onClose: () => void }) {
 
         <div className="about-legal">
           <div>© {new Date().getFullYear()} Jacob Davidsen · Big Soft Video · Aalborg University</div>
-          <div className="hint">All rights reserved.</div>
+          <div className="hint">Licensed under GPL-3.0-or-later.</div>
         </div>
 
         <h3>Credits</h3>

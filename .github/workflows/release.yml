@@ -139,6 +139,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
@@ -157,6 +161,10 @@ jobs:
           carry APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
           carry APPLE_API_ISSUER "$APPLE_API_ISSUER"
           carry APPLE_API_KEY "$APPLE_API_KEY"
+          carry APPLE_API_KEY_PATH "$APPLE_API_KEY_PATH"
+          carry APPLE_ID "$APPLE_ID"
+          carry APPLE_PASSWORD "$APPLE_PASSWORD"
+          carry APPLE_TEAM_ID "$APPLE_TEAM_ID"
           carry WINDOWS_CERTIFICATE "$WINDOWS_CERTIFICATE"
           carry WINDOWS_CERTIFICATE_PASSWORD "$WINDOWS_CERTIFICATE_PASSWORD"
           echo "Anything not listed above is unset, so that part stays ad-hoc signed."
