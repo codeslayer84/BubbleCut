@@ -1,8 +1,12 @@
 name: Release
 
 # Windows bundles cannot be produced on macOS — Tauri needs MSVC and WebView2
-# on an actual Windows machine — so each platform is built on its own runner
-# and the results are attached to one GitHub Release.
+# on an actual Windows machine — so each platform builds on its own runner.
+#
+# The release is created once, up front, and every platform uploads into it by
+# id. Letting the matrix jobs each create the release races: two of them find
+# no release for the tag, both make one, and the artifacts end up split across
+# two drafts.
 #
 # Push a tag to publish:
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -14,7 +18,61 @@ on:
   workflow_dispatch:
 
 jobs:
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the draft release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const body = [
+              'Desktop builds of Bubblecut.',
+              '',
+              '**FFmpeg is required and is not bundled.** Install it before running:',
+              '',
+              '- macOS: `brew install ffmpeg`',
+              '- Windows: `winget install Gyan.FFmpeg`',
+              '',
+              'The app checks on startup and shows the command for your platform if it',
+              'cannot find FFmpeg. On Apple silicon use a native arm64 build: an Intel',
+              'build under Rosetta cannot reach the hardware video encoder and exports',
+              'roughly 20x slower.',
+              '',
+              '### macOS',
+              '`Bubblecut_*_aarch64.dmg` — Apple silicon. The build is unsigned, so the',
+              'first launch needs right-click → Open, or:',
+              '`xattr -dr com.apple.quarantine "/Applications/Bubblecut.app"`',
+              '',
+              '### Windows',
+              '`Bubblecut_*_x64-setup.exe` (installer) or `Bubblecut_*_x64_en-US.msi`.',
+            ].join('\n');
+
+            // Reuse the release if the tag was pushed before, rather than
+            // making a second one.
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner, repo: context.repo.repo, tag,
+              })).data;
+            } catch (e) {
+              release = (await github.rest.repos.createRelease({
+                owner: context.repo.owner, repo: context.repo.repo,
+                tag_name: tag, name: `Bubblecut ${tag.replace(/^v/, '')}`,
+                body, draft: true, prerelease: false,
+              })).data;
+            }
+            return release.id;
+          result-encoding: string
+
   build:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -23,12 +81,11 @@ jobs:
         include:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            rust-targets: "aarch64-apple-darwin"
             name: "macOS (Apple silicon)"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
-            name: "macOS (Intel)"
           - platform: windows-latest
             args: ""
+            rust-targets: ""
             name: "Windows"
 
     runs-on: ${{ matrix.platform }}
@@ -40,7 +97,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust-targets }}
 
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
@@ -56,29 +113,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and attach to the release
+      - name: Build and upload into the release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Bubblecut ${{ github.ref_name }}"
-          releaseBody: |
-            Desktop builds of Bubblecut.
-
-            **FFmpeg is required and is not bundled.** Install it before running:
-
-            - macOS: `brew install ffmpeg`
-            - Windows: `winget install Gyan.FFmpeg`
-
-            On Apple silicon make sure the ffmpeg you install is a native arm64
-            build. An Intel build under Rosetta cannot reach the hardware video
-            encoder and exports roughly 20x slower; the app warns you if it
-            finds one.
-
-            The macOS builds are unsigned, so the first launch needs
-            right-click → Open, or:
-            `xattr -dr com.apple.quarantine "/Applications/Bubblecut.app"`
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  publish-release:
+    needs: [create-release, build]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish once every platform has uploaded
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner, repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              draft: false,
+            });
