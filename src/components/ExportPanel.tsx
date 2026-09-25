@@ -76,7 +76,7 @@ export function ExportPanel() {
   const total = timelineDuration(clips);
   const activeCards = cards.filter((c) => c.end > c.start && c.text.trim() !== "").length;
   const filterCount = clips.reduce((n, c) => n + c.filters.length, 0);
-  const selection = useStore((s) => s.selection);
+  const selections = useStore((s) => s.selections);
   const selectedIds = useStore((s) => s.selectedClipIds);
   const chosenClips = clips.filter((c) => selectedIds.includes(c.id));
   const canScopeClips = chosenClips.length > 0;
@@ -86,14 +86,14 @@ export function ExportPanel() {
   const [separateFiles, setSeparateFiles] = useState(false);
   const [batch, setBatch] = useState<{ index: number; of: number } | null>(null);
 
-  const effectiveScope = scope === "range" && !selection ? "all"
+  const effectiveScope = scope === "range" && selections.length === 0 ? "all"
     : scope === "clips" && !canScopeClips ? "all"
     : scope;
-  const activeSelection = effectiveScope === "range" ? selection : null;
+  const activeRanges = effectiveScope === "range" ? selections : [];
   const scopedClips = effectiveScope === "clips" ? chosenClips : clips;
   const exportLength = effectiveScope === "clips"
     ? chosenClips.reduce((n, c) => n + (c.outPoint - c.inPoint), 0)
-    : selectionDuration(clips, activeSelection);
+    : selectionDuration(clips, activeRanges);
   const running = progress !== null;
   const canExport = isTauri && clips.length > 0 && !!settings.output && !running;
 
@@ -131,14 +131,14 @@ export function ExportPanel() {
           const numbered = `${stem}_${String(i + 1).padStart(2, "0")}${ext}`;
           last = await runExport(
             [chosenClips[i]], media, cards,
-            { ...settings, output: numbered }, null, setProgress,
+            { ...settings, output: numbered }, [], setProgress,
           );
         }
         setBatch(null);
         if (last) setDone(last);
         setProgress(null);
       } else {
-        await startExport(scopedClips, media, cards, settings, activeSelection);
+        await startExport(scopedClips, media, cards, settings, activeRanges);
       }
     } catch (e) { setError(String(e)); setProgress(null); setBatch(null); }
   };
@@ -245,10 +245,10 @@ export function ExportPanel() {
         <span>What to export</span>
         <select value={effectiveScope} onChange={(e) => setScope(e.target.value as typeof scope)}>
           <option value="all">Whole timeline ({fmtTime(total)})</option>
-          <option value="range" disabled={!selection}>
-            {selection
-              ? `Time selection (${fmtTime(selection.start)}–${fmtTime(selection.end)})`
-              : "Time selection — drag the ruler first"}
+          <option value="range" disabled={selections.length === 0}>
+            {selections.length
+              ? `Marked ranges (${selections.length}) — ${fmtTime(selectionDuration(clips, selections))}`
+              : "Marked ranges — drag the ruler first"}
           </option>
           <option value="clips" disabled={!canScopeClips}>
             {canScopeClips
@@ -275,9 +275,10 @@ export function ExportPanel() {
           <span className="mono">{(settings.output.replace(/\.[^.]+$/, "") || "output") + "_01.mp4"}</span>.
         </div>
       )}
-      {effectiveScope === "range" && selection && (
+      {effectiveScope === "range" && selections.length > 0 && (
         <div className="hint sel-note">
-          Just <b>{fmtTime(selection.start)} – {fmtTime(selection.end)}</b> of {fmtTime(total)}.
+          {selections.length === 1 ? "One range" : `${selections.length} ranges`}, joined in
+          timeline order: {fmtTime(exportLength)} of {fmtTime(total)}.
         </div>
       )}
 

@@ -6,7 +6,7 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cardPngBase64 } from "./cardRender";
-import { sliceTimeline, type Selection } from "./selection";
+import { sliceTimeline, type Range } from "./selection";
 import type {
   Clip,
   ExportDone,
@@ -49,11 +49,11 @@ export function startExport(
   media: Record<string, MediaInfo>,
   allCards: TextCard[],
   settings: ExportSettings,
-  selection: Selection | null = null,
+  ranges: Range[] = [],
 ) {
   // Slicing here keeps the whole pipeline — per-clip filters, card overlays,
   // the concat — working on an ordinary shorter timeline.
-  const { clips, cards } = sliceTimeline(allClips, allCards, selection);
+  const { clips, cards } = sliceTimeline(allClips, allCards, ranges);
   const exportClips = clips.map((c) => {
     const m = media[c.mediaPath];
     return {
@@ -110,7 +110,7 @@ export function runExport(
   media: Record<string, MediaInfo>,
   cards: TextCard[],
   settings: ExportSettings,
-  selection: Selection | null,
+  ranges: Range[],
   onProgress: (p: Progress) => void,
 ): Promise<ExportDone> {
   return new Promise((resolve, reject) => {
@@ -119,7 +119,7 @@ export function runExport(
       done: (d) => { stop(); resolve(d); },
       error: (m) => { stop(); reject(new Error(m)); },
     });
-    startExport(clips, media, cards, settings, selection).catch((e) => {
+    startExport(clips, media, cards, settings, ranges).catch((e) => {
       stop();
       reject(e instanceof Error ? e : new Error(String(e)));
     });

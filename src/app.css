@@ -191,3 +191,15 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 /* A clip that is part of a multi-selection. */
 .clip.multi { outline: 2px solid var(--accent); outline-offset: -2px; }
 .clip.multi.selected { outline-color: #b9d2ff; }
+
+.sel-band { display: flex; align-items: flex-start; }
+.sel-index {
+  position: absolute; top: 2px; left: 6px; font-size: 10px; font-weight: 700;
+  color: #cfe0ff; pointer-events: none;
+}
+.sel-remove {
+  position: absolute; top: 1px; right: 2px; pointer-events: auto;
+  padding: 0 4px; font-size: 11px; line-height: 1.3;
+  background: rgba(0,0,0,.45); border: 1px solid var(--border); border-radius: 4px; color: #ffb3b0;
+}
+.sel-remove:hover { border-color: var(--danger); }

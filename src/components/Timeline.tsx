@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cardOpacity } from "../lib/cardRender";
+import { normalizeRanges, selectionDuration } from "../lib/selection";
 import { clipLength, clipStart, fmtTime, timelineDuration, useStore } from "../lib/store";
 
 const MIN_CLIP = 0.1;
@@ -13,10 +14,11 @@ export function Timeline() {
   const selectedIds = useStore((s) => s.selectedClipIds);
   const cards = useStore((s) => s.cards);
   const selectedCardId = useStore((s) => s.selectedCardId);
-  const selection = useStore((s) => s.selection);
+  const selections = useStore((s) => s.selections);
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
-    selectCard, updateCard, setRightTab, setSelection,
+    selectCard, updateCard, setRightTab,
+    addSelection, updateSelection, removeSelection, clearSelections,
     toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
@@ -124,16 +126,19 @@ export function Timeline() {
     }
   };
 
-  // Dragging along the ruler marks the part of the timeline to export.
+  // Each drag along the ruler adds another range, so several parts of a
+  // recording can be marked in one pass.
   const startSelectionDrag = (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
     setPlaying(false);
     const anchor = timeAt(e.clientX);
-    setSelection(null);
+    let id: string | null = null;
     const move = (ev: PointerEvent) => {
       const t = timeAt(ev.clientX);
-      setSelection({ start: Math.min(anchor, t), end: Math.max(anchor, t) });
+      const range = { start: Math.min(anchor, t), end: Math.max(anchor, t) };
+      if (id) updateSelection(id, range);
+      else id = addSelection(range);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -143,16 +148,14 @@ export function Timeline() {
     window.addEventListener("pointerup", up);
   };
 
-  const dragSelectionEdge = (e: React.PointerEvent, edge: "start" | "end") => {
+  const dragSelectionEdge = (e: React.PointerEvent, id: string, edge: "start" | "end") => {
     e.stopPropagation();
     e.preventDefault();
-    const current = useStore.getState().selection;
-    if (!current) return;
     const move = (ev: PointerEvent) => {
       const t = timeAt(ev.clientX);
-      const next = useStore.getState().selection;
-      if (!next) return;
-      setSelection(edge === "start" ? { start: t, end: next.end } : { start: next.start, end: t });
+      const r = useStore.getState().selections.find((x) => x.id === id);
+      if (!r) return;
+      updateSelection(id, edge === "start" ? { start: t, end: r.end } : { start: r.start, end: t });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -182,6 +185,18 @@ export function Timeline() {
   })();
   const laneHeight = cardRows.count * CARD_ROW_H + (cardRows.count - 1) * CARD_ROW_GAP;
 
+  // The stretches that will not be exported, for dimming.
+  const merged = normalizeRanges(selections);
+  const dimGaps: { from: number; to: number }[] = [];
+  if (merged.length) {
+    let at = 0;
+    for (const r of merged) {
+      if (r.start > at) dimGaps.push({ from: at, to: r.start });
+      at = Math.max(at, r.end);
+    }
+    if (at < total) dimGaps.push({ from: at, to: total });
+  }
+
   const ticks: number[] = [];
   const step = pxPerSec > 60 ? 1 : pxPerSec > 25 ? 5 : pxPerSec > 8 ? 10 : pxPerSec > 3 ? 30 : 60;
   for (let t = 0; t <= total; t += step) ticks.push(t);
@@ -200,20 +215,10 @@ export function Timeline() {
         <span className="time">{fmtTime(playhead)} / {fmtTime(total)}</span>
         <span className="spacer" />
         <button onClick={splitAtPlayhead} disabled={!clips.length} title="S">Split</button>
-        <span className="sep" />
-        <button
-          onClick={() => setSelection({ start: playhead, end: selection?.end ?? total })}
-          disabled={!clips.length}
-          title="Start the export selection here"
-        >
-          [
-        </button>
-        <button
-          onClick={() => setSelection({ start: selection?.start ?? 0, end: playhead })}
-          disabled={!clips.length}
-          title="End the export selection here"
-        >
-          ]
+        <button onClick={() => selectedId && moveClip(selectedId, -1)} disabled={!selectedId} title="Move earlier">◀</button>
+        <button onClick={() => selectedId && moveClip(selectedId, 1)} disabled={!selectedId} title="Move later">▶</button>
+        <button onClick={() => selectedId && removeClip(selectedId)} disabled={!selectedId} title="Delete" className="danger">
+          Remove
         </button>
         <button
           onClick={() => {
@@ -225,26 +230,30 @@ export function Timeline() {
             });
           }}
           disabled={clips.length < 2}
-          title="Select every clip, for exporting them separately"
+          title="Select every clip"
         >
           {selectedIds.length === clips.length && clips.length > 1 ? "Deselect all" : "Select all"}
         </button>
         {selectedIds.length > 1 && (
           <span className="hint sel-readout">{selectedIds.length} clips selected</span>
         )}
-        {selection && (
+        <span className="sep" />
+        <button
+          onClick={() => addSelection({ start: playhead, end: Math.min(total, playhead + 5) })}
+          disabled={!clips.length}
+          title="Add a five second range here, then drag its edges"
+        >
+          + Range
+        </button>
+        {selections.length > 0 && (
           <>
             <span className="hint sel-readout">
-              {fmtTime(selection.start)}–{fmtTime(selection.end)}
+              {selections.length} range{selections.length === 1 ? "" : "s"} ·{" "}
+              {fmtTime(selectionDuration(clips, selections))}
             </span>
-            <button onClick={() => setSelection(null)} title="Clear the selection">Clear</button>
+            <button onClick={clearSelections} title="Remove every range">Clear</button>
           </>
         )}
-        <button onClick={() => selectedId && moveClip(selectedId, -1)} disabled={!selectedId} title="Move earlier">◀</button>
-        <button onClick={() => selectedId && moveClip(selectedId, 1)} disabled={!selectedId} title="Move later">▶</button>
-        <button onClick={() => selectedId && removeClip(selectedId)} disabled={!selectedId} title="Delete" className="danger">
-          Remove
-        </button>
         <span className="spacer" />
         <label className="zoom">
           Zoom
@@ -359,28 +368,39 @@ export function Timeline() {
               })}
             </div>
           )}
-          {selection && (
+          {selections.length > 0 && (
             <div className="selection-layer">
-              {/* Everything outside the selection is dimmed, so what will be
+              {/* Everything not inside a range is dimmed, so what will be
                   exported is obvious at a glance. */}
-              <div className="sel-dim" style={{ left: 0, width: selection.start * pxPerSec }} />
-              <div
-                className="sel-dim"
-                style={{
-                  left: selection.end * pxPerSec,
-                  width: Math.max(0, (total - selection.end) * pxPerSec),
-                }}
-              />
-              <div
-                className="sel-band"
-                style={{
-                  left: selection.start * pxPerSec,
-                  width: Math.max(2, (selection.end - selection.start) * pxPerSec),
-                }}
-              >
-                <div className="sel-handle left" onPointerDown={(e) => dragSelectionEdge(e, "start")} />
-                <div className="sel-handle right" onPointerDown={(e) => dragSelectionEdge(e, "end")} />
-              </div>
+              {dimGaps.map((g, i) => (
+                <div
+                  key={`gap${i}`}
+                  className="sel-dim"
+                  style={{ left: g.from * pxPerSec, width: Math.max(0, (g.to - g.from) * pxPerSec) }}
+                />
+              ))}
+              {selections.map((r, i) => (
+                <div
+                  key={r.id}
+                  className="sel-band"
+                  style={{
+                    left: r.start * pxPerSec,
+                    width: Math.max(3, (r.end - r.start) * pxPerSec),
+                  }}
+                  title={`${fmtTime(r.start)}–${fmtTime(r.end)}`}
+                >
+                  <div className="sel-handle left" onPointerDown={(e) => dragSelectionEdge(e, r.id, "start")} />
+                  <span className="sel-index">{i + 1}</span>
+                  <button
+                    className="sel-remove"
+                    title="Remove this range"
+                    onPointerDown={(e) => { e.stopPropagation(); removeSelection(r.id); }}
+                  >
+                    ×
+                  </button>
+                  <div className="sel-handle right" onPointerDown={(e) => dragSelectionEdge(e, r.id, "end")} />
+                </div>
+              ))}
             </div>
           )}
           <div className="playhead" style={{ left: playhead * pxPerSec }} />

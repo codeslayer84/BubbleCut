@@ -25,6 +25,12 @@ export interface View {
   fov: number;
 }
 
+export interface TimeRange {
+  id: string;
+  start: number;
+  end: number;
+}
+
 export type RightTab = "edit" | "text" | "filters" | "export" | "tools";
 
 export const defaultCard = (start: number, end: number, yaw: number, pitch: number): TextCard => ({
@@ -54,8 +60,8 @@ interface State {
   clips: Clip[];
   cards: TextCard[];
   previewFilters: boolean;
-  /** Timeline range to export, in timeline seconds. Null exports everything. */
-  selection: { start: number; end: number } | null;
+  /** Ranges of the timeline to export, in timeline seconds. Empty = all of it. */
+  selections: TimeRange[];
   /** Which panel the right sidebar is showing. */
   rightTab: RightTab;
   /** Saved filter chains, shared across projects. */
@@ -80,7 +86,10 @@ interface State {
   moveFilter: (clipId: string, id: string, dir: -1 | 1) => void;
   copyFiltersToAllClips: (clipId: string) => void;
   setPreviewFilters: (on: boolean) => void;
-  setSelection: (range: { start: number; end: number } | null) => void;
+  addSelection: (range: { start: number; end: number }) => string | null;
+  updateSelection: (id: string, range: { start: number; end: number }) => void;
+  removeSelection: (id: string) => void;
+  clearSelections: () => void;
   setRightTab: (tab: RightTab) => void;
   refreshPresets: () => Promise<void>;
   savePresetFromClip: (clipId: string, name: string) => Promise<string | null>;
@@ -111,7 +120,7 @@ export const useStore = create<State>((set, get) => ({
   clips: [],
   cards: [],
   previewFilters: true,
-  selection: null,
+  selections: [],
   rightTab: "edit",
   presets: [],
   selectedClipId: null,
@@ -214,14 +223,26 @@ export const useStore = create<State>((set, get) => ({
       };
     }),
   setPreviewFilters: (previewFilters) => set({ previewFilters }),
-  setSelection: (selection) =>
-    set(() => {
-      if (!selection) return { selection: null };
-      // Keep it ordered and non-empty however it was dragged.
-      const start = Math.max(0, Math.min(selection.start, selection.end));
-      const end = Math.max(selection.start, selection.end);
-      return { selection: end - start < 0.05 ? null : { start, end } };
-    }),
+  // Each drag adds a range rather than replacing the last, so several parts
+  // of a recording can be picked out in one pass.
+  addSelection: (range) => {
+    const start = Math.max(0, Math.min(range.start, range.end));
+    const end = Math.max(range.start, range.end);
+    if (end - start < 0.05) return null;
+    const id = newId();
+    set((s) => ({ selections: [...s.selections, { id, start, end }] }));
+    return id;
+  },
+  updateSelection: (id, range) =>
+    set((s) => ({
+      selections: s.selections.map((r) =>
+        r.id === id
+          ? { ...r, start: Math.max(0, Math.min(range.start, range.end)), end: Math.max(range.start, range.end) }
+          : r,
+      ),
+    })),
+  removeSelection: (id) => set((s) => ({ selections: s.selections.filter((r) => r.id !== id) })),
+  clearSelections: () => set({ selections: [] }),
   setRightTab: (rightTab) => set({ rightTab }),
 
   refreshPresets: async () => set({ presets: await loadPresets() }),
