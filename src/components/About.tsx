@@ -4,7 +4,7 @@ import { ffmpegInfo, isTauri, type FfmpegInfo } from "../lib/tauri";
 // A fixed /app-icon.png stays in the webview's cache across a redesign.
 import appIcon from "../assets/app-icon.png";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 /** Ten lines on what this is, also used as the app's description. */
 export const DESCRIPTION = [

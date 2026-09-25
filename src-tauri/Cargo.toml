@@ -1,6 +1,6 @@
 [package]
 name = "bubblecut"
-version = "0.1.1"
+version = "0.1.2"
 description = "360° video editor with reliable VR export"
 authors = ["jdavidsen"]
 edition = "2021"
