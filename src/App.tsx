@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Viewer } from "./components/Viewer";
 import { Timeline } from "./components/Timeline";
 import { Inspector } from "./components/Inspector";
@@ -6,6 +6,7 @@ import { MediaBin } from "./components/MediaBin";
 import { ExportPanel } from "./components/ExportPanel";
 import { CardPanel } from "./components/CardPanel";
 import { FilterPanel } from "./components/FilterPanel";
+import { About } from "./components/About";
 import { TagTool } from "./components/TagTool";
 import { clipAt, toProjectFile, useStore, type RightTab } from "./lib/store";
 import { isTauri, pickOpenPath, pickSavePath, readTextFile, writeTextFile } from "./lib/tauri";
@@ -13,6 +14,7 @@ import type { ProjectFile } from "./lib/types";
 import "./app.css";
 
 export default function App() {
+  const [showAbout, setShowAbout] = useState(false);
   const tab = useStore((s) => s.rightTab);
   const setTab = useStore((s) => s.setRightTab);
   const projectPath = useStore((s) => s.projectPath);
@@ -74,6 +76,7 @@ export default function App() {
           ))}
         </nav>
         <span className="spacer" />
+        <button onClick={() => setShowAbout(true)} title="About 360 Editor">About</button>
         {isTauri && (
           <div className="project">
             <span className="hint">{projectPath ? projectPath.split("/").pop() : "Untitled"}{dirty ? " •" : ""}</span>
@@ -101,6 +104,8 @@ export default function App() {
           {tab === "tools" && <TagTool />}
         </aside>
       </main>
+
+      {showAbout && <About onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

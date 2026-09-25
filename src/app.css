@@ -145,3 +145,21 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
   border: 1px solid rgba(255, 255, 255, .2);
 }
 .clip-filters:hover .clip-filter { background: rgba(255, 255, 255, .34); }
+
+/* ---- about ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 20px; box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+}
+.about { width: 560px; max-width: calc(100vw - 40px); max-height: calc(100vh - 80px); overflow: auto; }
+.about-head { display: flex; gap: 14px; align-items: center; }
+.about-head img { border-radius: 16px; flex: none; }
+.about-head h2 { margin: 0; font-size: 20px; }
+.about-desc { color: #c6ccd6; line-height: 1.55; }
+.about-legal { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+.about-credits { margin: 0; padding-left: 18px; color: #c6ccd6; font-size: 12px; line-height: 1.7; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }

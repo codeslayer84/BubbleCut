@@ -26,3 +26,6 @@ dist-ssr
 # Rust
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# Intermediate raster for the icon generator
+icon/*.raw
