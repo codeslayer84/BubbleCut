@@ -44,6 +44,46 @@ export function Inspector() {
     set({ outPoint: Math.max(at.sourceTime, clip.inPoint + 0.1) });
   };
 
+  if (clip.fill) {
+    // A title card has no footage behind it, so the media rows would all be
+    // blank. Show what can actually be changed.
+    return (
+      <div className="inspector">
+        <h3>Title card</h3>
+        <div className="kv">
+          <span>Length</span><span>{fmtTime(clip.outPoint - clip.inPoint)}</span>
+          <span>Colour</span>
+          <span>
+            <input
+              type="color"
+              value={clip.fill.color}
+              onChange={(e) => set({ fill: { color: e.target.value } })}
+            />
+          </span>
+        </div>
+        <label className="angle">
+          <span>Seconds</span>
+          <input
+            type="range" min={0.5} max={30} step={0.5}
+            value={clip.outPoint - clip.inPoint}
+            onChange={(e) => set({ outPoint: clip.inPoint + +e.target.value })}
+          />
+          <input
+            type="number" min={0.5} max={60} step={0.5}
+            value={clip.outPoint - clip.inPoint}
+            onChange={(e) => set({ outPoint: clip.inPoint + Math.max(0.5, +e.target.value) })}
+          />
+          <span className="unit">s</span>
+        </label>
+        <p className="hint">
+          The words come from an ordinary text card, so edit them in the Text tab — font,
+          colour and fades all work as they do anywhere else. Changing the length here does
+          not move the card; drag its ends on the timeline to match.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="inspector">
       <h3>Clip</h3>

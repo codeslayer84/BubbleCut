@@ -27,6 +27,10 @@ decode/encode step.
 - Per-clip **orientation** (yaw/pitch/roll) — set where the viewer starts
   looking. "Set current view as front" takes whatever is under the reticle.
   Preview matches ffmpeg's `v360` filter exactly.
+- **Title cards**: "+ Title" drops a block of flat colour in at the playhead,
+  splitting whatever is there. The words are an ordinary text card laid over
+  it, so the font, colour, fades and timing all work as they do elsewhere, and
+  the colour and length are on the Clip tab.
 - **Text cards**: place captions anywhere in the 360° sphere, with a time
   range, angular size, colours and a background box. Cards are rendered once
   on an HTML canvas and that same canvas is used for both the preview texture

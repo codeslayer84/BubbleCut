@@ -111,12 +111,23 @@ export function Viewer() {
       const active = previewFilters && at ? at.clip.filters : [];
       chain.setChain(active);
       const m = at ? media[at.clip.mediaPath] : undefined;
-      const filtered = active.length && m
-        ? chain.render(texture, m.width, m.height, active)
-        : texture;
-      if (material.map !== filtered) {
-        material.map = filtered;
-        material.needsUpdate = true;
+      const fill = at?.clip.fill;
+      if (fill) {
+        // A title card: flat colour, with its text drawn by the usual card.
+        if (material.map !== null) {
+          material.map = null;
+          material.needsUpdate = true;
+        }
+        material.color.set(fill.color);
+      } else {
+        material.color.set(0xffffff);
+        const filtered = active.length && m
+          ? chain.render(texture, m.width, m.height, active)
+          : texture;
+        if (material.map !== filtered) {
+          material.map = filtered;
+          material.needsUpdate = true;
+        }
       }
 
       camera.quaternion.copy(cameraQuaternion(at?.clip ?? null, view));
@@ -257,6 +268,7 @@ export function Viewer() {
       loadedPath.current = null;
       return;
     }
+    if (at.clip.fill) { video.pause(); return; }
     const m = media[at.clip.mediaPath];
     if (!m) return;
     const seek = () => {

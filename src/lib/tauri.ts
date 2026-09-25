@@ -54,6 +54,12 @@ export function startExport(
   // Slicing here keeps the whole pipeline — per-clip filters, card overlays,
   // the concat — working on an ordinary shorter timeline.
   const { clips, cards } = sliceTimeline(allClips, allCards, ranges);
+  const firstReal = clips.map((c) => media[c.mediaPath]).find(Boolean);
+  const fallback = {
+    width: firstReal?.width ?? 3840,
+    height: firstReal?.height ?? 1920,
+    fps: firstReal?.fps ?? 30,
+  };
   const exportClips = clips.map((c) => {
     const m = media[c.mediaPath];
     return {
@@ -65,9 +71,12 @@ export function startExport(
       roll: c.roll,
       hasAudio: m?.hasAudio ?? false,
       stereoMode: m?.stereoMode ?? "mono",
-      width: m?.width ?? 0,
-      height: m?.height ?? 0,
-      fps: m?.fps ?? 0,
+      // A title card has no media behind it, so borrow the sizing from the
+      // first real clip; otherwise ffmpeg has nothing to generate against.
+      width: m?.width ?? fallback.width,
+      height: m?.height ?? fallback.height,
+      fps: m?.fps ?? fallback.fps,
+      fillColor: c.fill?.color ?? null,
     };
   });
   // Cards are rasterised here so the export matches the preview exactly.

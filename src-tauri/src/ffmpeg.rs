@@ -333,6 +333,9 @@ pub struct ExportClip {
     pub width: u32,
     pub height: u32,
     pub fps: f64,
+    /// A generated block of colour instead of a file: a title card.
+    #[serde(default)]
+    pub fill_color: Option<String>,
 }
 
 /// A text card burned into the exported video. The PNG is rendered by the UI
@@ -418,6 +421,27 @@ fn fmt(f: f64) -> String {
 }
 
 
+/// How one clip is fed to ffmpeg: a file seeked to its in point, or a
+/// generated block of colour for a title card.
+fn clip_input_args(c: &ExportClip) -> Vec<String> {
+    match &c.fill_color {
+        Some(colour) => {
+            // Generated at the clip's own size and rate; the per-clip chain
+            // then scales it like anything else, so it matches the footage.
+            let (w, h) = (c.width.max(2), c.height.max(2));
+            let rate = c.fps.max(1.0);
+            let len = (c.out_point - c.in_point).max(0.0);
+            vec![
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                format!("color=c={colour}:s={w}x{h}:r={rate}:d={:.4}", len),
+            ]
+        }
+        None => vec!["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()],
+    }
+}
+
 /// The per-clip video chain: trim, optional reorientation, resize, frame rate.
 /// `out_format` is the pixel format the chain ends in, which differs between
 /// the encode path (yuv420p) and the GPU path (rgba, to keep full chroma).
@@ -448,7 +472,7 @@ fn clip_video_chain(i: usize, c: &ExportClip, s: &ExportSettings, out_format: &s
 pub fn build_video_decode_args(clips: &[ExportClip], s: &ExportSettings) -> Vec<String> {
     let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
     for c in clips {
-        args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
+        args.extend(clip_input_args(c));
     }
 
     let mut graph: Vec<String> = Vec::new();
@@ -475,7 +499,7 @@ pub fn build_video_decode_args(clips: &[ExportClip], s: &ExportSettings) -> Vec<
 pub fn build_audio_args(clips: &[ExportClip], out: &Path) -> Vec<String> {
     let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
     for c in clips {
-        args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
+        args.extend(clip_input_args(c));
     }
     let silence_idx = clips.len();
     let any_silent = clips.iter().any(|c| !c.has_audio);
@@ -638,7 +662,7 @@ pub fn build_plan(
     // Inputs. `-ss` before `-i` seeks fast on the demuxer; we then trim
     // precisely in the filter graph relative to the seeked position.
     for c in clips {
-        args.extend(["-ss".into(), fmt(c.in_point), "-i".into(), c.path.clone()]);
+        args.extend(clip_input_args(c));
     }
     let silence_idx = clips.len();
     let any_silent = clips.iter().any(|c| !c.has_audio);
@@ -943,7 +967,7 @@ mod tests {
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 6.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1013,7 +1037,7 @@ mod tests {
         // the clip's own yaw must not drag the card along with it.
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1067,7 +1091,7 @@ mod tests {
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 8.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1161,7 +1185,7 @@ mod tests {
         let clips = vec![ExportClip {
             path: src, in_point: 3.0, out_point: 7.0,
             yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: true,
-            stereo_mode: StereoMode::Mono, width: 320, height: 160, fps: 10.0,
+            stereo_mode: StereoMode::Mono, width: 320, height: 160, fps: 10.0, fill_color: None,
         }];
         let out = dir.join("out.mp4");
         let tmp = dir.join("tmp.mp4");
@@ -1189,6 +1213,60 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A title card is a generated block of colour with no file behind it. It
+    /// has to join the timeline like any other clip, silence included.
+    #[test]
+    fn a_title_clip_is_generated_not_read_from_a_file() {
+        let dir = std::env::temp_dir().join(format!("bubblecut-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = gen_plain(&dir, "a.mp4", 2);
+
+        let footage = ExportClip {
+            path: src, in_point: 0.0, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
+            has_audio: true, stereo_mode: StereoMode::Mono,
+            width: 640, height: 320, fps: 30.0, fill_color: None,
+        };
+        let title = ExportClip {
+            path: String::new(), in_point: 0.0, out_point: 1.5,
+            yaw: 0.0, pitch: 0.0, roll: 0.0,
+            has_audio: false, stereo_mode: StereoMode::Mono,
+            width: 640, height: 320, fps: 30.0,
+            fill_color: Some("#000000".into()),
+        };
+
+        let out = dir.join("out.mp4");
+        let tmp = dir.join("tmp.mp4");
+        let settings = ExportSettings {
+            output: out.to_string_lossy().into_owned(),
+            encoder: "libx264".into(), width: 640, height: 320, fps: 30.0,
+            video_bitrate_mbps: 4.0, audio_bitrate_kbps: 128,
+            stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: false,
+        };
+        // Title first, then footage.
+        let clips = vec![title, footage];
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
+        assert!((plan.total_duration - 3.5).abs() < 1e-6);
+        run(&plan, &ExportHandle::default(), |_| {}).unwrap();
+
+        let v = tmp.to_string_lossy().into_owned();
+        let info = probe(&v).unwrap();
+        assert!((info.duration - 3.5).abs() < 0.2, "duration {}", info.duration);
+        assert!(info.has_audio, "the silent title must not lose the audio track");
+
+        // The first second and a half is black, then the footage appears.
+        let brightness = |at: f64| -> u8 {
+            let o = Command::new(ffmpeg())
+                .args(["-v", "error", "-ss", &format!("{at}"), "-i", &v, "-frames:v", "1",
+                       "-pix_fmt", "gray", "-f", "rawvideo", "-"])
+                .output().unwrap().stdout;
+            o[o.len() / 2]
+        };
+        assert!(brightness(0.7) < 20, "title should be black, got {}", brightness(0.7));
+        assert!(brightness(2.5) > 30, "footage should follow, got {}", brightness(2.5));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn export_two_clips_end_to_end() {
         let dir = std::env::temp_dir().join(format!("bubblecut-export-{}", uuid::Uuid::new_v4()));
@@ -1196,8 +1274,8 @@ mod tests {
         let a = gen(&dir, "a.mp4", true, 4);
         let b = gen(&dir, "b.mp4", false, 4);
         let clips = vec![
-            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0 },
-            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0 },
+            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None },
+            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None },
         ];
         let encoders = available_encoders().unwrap();
         let encoder = if encoders.iter().any(|e| e == "libx264") { "libx264" } else { &encoders[0] }.to_string();

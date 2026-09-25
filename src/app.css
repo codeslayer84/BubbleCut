@@ -203,3 +203,8 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
   background: rgba(0,0,0,.45); border: 1px solid var(--border); border-radius: 4px; color: #ffb3b0;
 }
 .sel-remove:hover { border-color: var(--danger); }
+
+/* A generated title card, distinct from footage. */
+.clip.fill { background: #23262e; border-color: #3c414c; }
+.clip.fill .clip-name { color: #e8ecf5; }
+.clip.fill .clip-meta { color: #9aa3b2; }

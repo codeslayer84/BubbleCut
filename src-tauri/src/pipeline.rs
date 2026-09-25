@@ -307,7 +307,7 @@ mod tests {
             path, in_point: 0.0, out_point: 2.0,
             yaw: 0.0, pitch: 0.0, roll: 0.0,
             has_audio: true, stereo_mode: StereoMode::Mono,
-            width: 640, height: 320, fps: 30.0,
+            width: 640, height: 320, fps: 30.0, fill_color: None,
         }
     }
 

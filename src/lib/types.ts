@@ -30,6 +30,12 @@ export interface Clip {
   roll: number;
   /** Image filters applied to this clip only, in order. */
   filters: FilterInstance[];
+  /**
+   * A generated block of flat colour rather than footage — a title card. The
+   * words come from an ordinary text card laid over it, so styling and timing
+   * work the same as anywhere else.
+   */
+  fill?: { color: string };
 }
 
 export interface TextCard {

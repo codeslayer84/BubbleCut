@@ -18,7 +18,7 @@ export function Timeline() {
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
     selectCard, updateCard, setRightTab,
-    addSelection, updateSelection, removeSelection, clearSelections,
+    addSelection, updateSelection, removeSelection, clearSelections, addTitleClip,
     toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
@@ -215,6 +215,12 @@ export function Timeline() {
         <span className="time">{fmtTime(playhead)} / {fmtTime(total)}</span>
         <span className="spacer" />
         <button onClick={splitAtPlayhead} disabled={!clips.length} title="S">Split</button>
+        <button
+          onClick={() => addTitleClip("Title", 3, "#000000")}
+          title="Insert a black card with text at the playhead"
+        >
+          + Title
+        </button>
         <button onClick={() => selectedId && moveClip(selectedId, -1)} disabled={!selectedId} title="Move earlier">◀</button>
         <button onClick={() => selectedId && moveClip(selectedId, 1)} disabled={!selectedId} title="Move later">▶</button>
         <button onClick={() => selectedId && removeClip(selectedId)} disabled={!selectedId} title="Delete" className="danger">
@@ -274,11 +280,15 @@ export function Timeline() {
               x += w;
               const m = media[c.mediaPath];
               const oriented = c.yaw || c.pitch || c.roll;
+              const titleText = c.fill
+                ? (cards.find((k) => Math.abs(k.start - left / pxPerSec) < 0.2)?.text ?? "").split("\n")[0]
+                : "";
               return (
                 <div
                   key={c.id}
                   className={
                     "clip" +
+                    (c.fill ? " fill" : "") +
                     (c.id === selectedId ? " selected" : "") +
                     (selectedIds.includes(c.id) ? " multi" : "")
                   }
@@ -305,10 +315,14 @@ export function Timeline() {
                 >
                   <div className="clip-handle left" onPointerDown={(e) => startTrim(e, c.id, "in")} />
                   <div className="clip-body">
-                    <div className="clip-name">{m?.name ?? c.mediaPath}</div>
+                    <div className="clip-name">
+                      {c.fill ? (titleText ? `Title — ${titleText}` : "Title card") : (m?.name ?? c.mediaPath)}
+                    </div>
                     <div className="clip-meta">
-                      {fmtTime(c.inPoint)} → {fmtTime(c.outPoint)} · {fmtTime(clipLength(c))}
-                      {oriented ? ` · ↻ ${c.yaw}°/${c.pitch}°/${c.roll}°` : ""}
+                      {c.fill
+                        ? `${fmtTime(clipLength(c))} · ${c.fill.color}`
+                        : `${fmtTime(c.inPoint)} → ${fmtTime(c.outPoint)} · ${fmtTime(clipLength(c))}` +
+                          (oriented ? ` · ↻ ${c.yaw}°/${c.pitch}°/${c.roll}°` : "")}
                     </div>
                     {c.filters.length > 0 && (
                       <div

@@ -80,6 +80,7 @@ interface State {
   addMedia: (m: MediaInfo, appendToTimeline?: boolean) => void;
   removeMedia: (path: string) => void;
   appendClip: (mediaPath: string) => void;
+  addTitleClip: (text: string, seconds: number, color: string) => void;
   addFilter: (clipId: string, name: string, params: Record<string, number>) => void;
   updateFilter: (clipId: string, id: string, params: Record<string, number>) => void;
   removeFilter: (clipId: string, id: string) => void;
@@ -166,6 +167,60 @@ export const useStore = create<State>((set, get) => ({
         dirty: true,
       };
     }),
+  // A title is a coloured clip with a text card over it. Inserted at the
+  // playhead, splitting whatever is there, which is where an editor would
+  // expect a caption card to land.
+  addTitleClip: (text, seconds, color) =>
+    set((s) => {
+      let clips = [...s.clips];
+      let at = 0;
+      let index = clips.length;
+      for (let i = 0; i < clips.length; i++) {
+        const len = clipLength(clips[i]);
+        const local = s.playhead - at;
+        if (local > 0.05 && local < len - 0.05) {
+          const cut = clips[i].inPoint + local;
+          const a = { ...clips[i], outPoint: cut };
+          const b = { ...clips[i], id: newId(), inPoint: cut };
+          clips = [...clips.slice(0, i), a, b, ...clips.slice(i + 1)];
+          index = i + 1;
+          at += local;
+          break;
+        }
+        if (Math.abs(local) <= 0.05) { index = i; break; }
+        at += len;
+        index = i + 1;
+      }
+
+      const title: Clip = {
+        id: newId(),
+        mediaPath: "",
+        inPoint: 0,
+        outPoint: seconds,
+        yaw: 0,
+        pitch: 0,
+        roll: 0,
+        filters: [],
+        fill: { color },
+      };
+      clips.splice(index, 0, title);
+
+      const card = defaultCard(at, at + seconds, 0, 0);
+      card.text = text;
+      card.bgOpacity = 0;      // the clip is already the background
+      card.fadeIn = 0.4;
+      card.fadeOut = 0.4;
+
+      return {
+        clips,
+        cards: [...s.cards, card],
+        selectedClipId: title.id,
+        selectedClipIds: [title.id],
+        selectedCardId: card.id,
+        dirty: true,
+      };
+    }),
+
   addFilter: (clipId, name, params) =>
     set((s) => ({
       clips: s.clips.map((c) =>
