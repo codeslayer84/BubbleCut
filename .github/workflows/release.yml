@@ -113,20 +113,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and upload into the release
-        uses: tauri-apps/tauri-action@v0
+      # Signing credentials are only put into the environment when they
+      # actually exist. Passing them through unconditionally sets them to the
+      # empty string, and Tauri treats "set but empty" as "sign this", then
+      # fails importing a certificate that is not there:
+      #   security: SecKeychainItemImport: ... parameters ... were not valid
+      - name: Enable signing if the secrets are set
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signing is optional. With these repository secrets unset the build
-          # still succeeds and is ad-hoc signed, which is what happens today.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          carry() {
+            local name=$1 value=${2-}
+            [ -n "$value" ] || return 0
+            {
+              echo "$name<<__EOF_SECRET__"
+              echo "$value"
+              echo "__EOF_SECRET__"
+            } >> "$GITHUB_ENV"
+            echo "signing: $name is set"
+          }
+          carry APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+          carry APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+          carry APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+          carry APPLE_API_ISSUER "$APPLE_API_ISSUER"
+          carry APPLE_API_KEY "$APPLE_API_KEY"
+          carry WINDOWS_CERTIFICATE "$WINDOWS_CERTIFICATE"
+          carry WINDOWS_CERTIFICATE_PASSWORD "$WINDOWS_CERTIFICATE_PASSWORD"
+          echo "Anything not listed above is unset, so that part stays ad-hoc signed."
+
+      - name: Build and upload into the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
