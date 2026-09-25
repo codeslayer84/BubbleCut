@@ -24,8 +24,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create.outputs.result }}
+      can_sign_mac: ${{ steps.signing.outputs.mac }}
     steps:
       - uses: actions/checkout@v4
+
+      # An unsigned macOS build is worse than none: it overwrites a notarised
+      # one uploaded by hand, and anyone downloading it meets Gatekeeper.
+      - name: Can macOS be signed here?
+        id: signing
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$CERT" ]; then
+            echo "mac=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mac=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No APPLE_CERTIFICATE secret, so the macOS build is skipped. Build and notarize it locally with scripts/build-signed.sh."
+          fi
+
       - name: Create the draft release
         id: create
         uses: actions/github-script@v7
@@ -103,6 +119,10 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     name: ${{ matrix.name }}
+    # Skip macOS entirely rather than publish an unsigned build over a good one.
+    if: >-
+      matrix.platform != 'macos-latest' ||
+      needs.create-release.outputs.can_sign_mac == 'true' 
 
     steps:
       - uses: actions/checkout@v4
