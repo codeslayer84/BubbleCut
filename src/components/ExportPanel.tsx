@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { clipLength, clipStart, fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
-import { sliceAudio, selectionDuration } from "../lib/selection";
+import { clipLength, fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
+import { selectionDuration } from "../lib/selection";
 import {
   cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, runExport,
   startExport, writeTextFile, type FfmpegInfo,
@@ -39,7 +39,6 @@ export function ExportPanel() {
   const clips = useStore((s) => s.clips);
   const media = useStore((s) => s.media);
   const cards = useStore((s) => s.cards);
-  const audio = useStore((s) => s.audio);
   const settings = useStore((s) => s.exportSettings);
   const { setExportSettings, toggleClipSelected, setSelectedClips } = useStore.getState();
 
@@ -129,21 +128,16 @@ export function ExportPanel() {
         for (let i = 0; i < chosenClips.length; i++) {
           setBatch({ index: i + 1, of: chosenClips.length });
           const numbered = `${stem}_${String(i + 1).padStart(2, "0")}${ext}`;
-          // Each file is its own little timeline starting at zero, so the
-          // audio lane has to be re-cut to the span this clip occupied.
-          const from = clipStart(clips, chosenClips[i].id);
-          const span = clipLength(chosenClips[i]);
           last = await runExport(
             [chosenClips[i]], media, cards,
             { ...settings, output: numbered }, [], setProgress,
-            sliceAudio(audio, from, from + span, -from),
           );
         }
         setBatch(null);
         if (last) setDone(last);
         setProgress(null);
       } else {
-        await startExport(scopedClips, media, cards, settings, activeRanges, audio);
+        await startExport(scopedClips, media, cards, settings, activeRanges);
       }
     } catch (e) { setError(String(e)); setProgress(null); setBatch(null); }
   };

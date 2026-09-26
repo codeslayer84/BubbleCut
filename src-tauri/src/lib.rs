@@ -3,9 +3,7 @@ mod gpufilters;
 mod pipeline;
 mod spherical;
 
-use ffmpeg::{
-    ExportAudio, ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode,
-};
+use ffmpeg::{ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode};
 use gpufilters::FilterSpec;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -111,8 +109,6 @@ fn start_export(
     handle: State<'_, ExportHandle>,
     clips: Vec<ExportClip>,
     cards: Vec<ExportCard>,
-    // Music or narration laid over the clips' own sound.
-    tracks: Vec<ExportAudio>,
     // One filter chain per clip, in the same order as `clips`.
     filters: Vec<Vec<FilterSpec>>,
     settings: ExportSettings,
@@ -132,9 +128,9 @@ fn start_export(
     let filtered = if !any_filters {
         None
     } else {
-        Some(pipeline::build(&clips, &cards, &tracks, &settings, &tmp).map_err(|e| e.to_string())?)
+        Some(pipeline::build(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?)
     };
-    let plan = ffmpeg::build_plan(&clips, &cards, &tracks, &settings, &tmp).map_err(|e| e.to_string())?;
+    let plan = ffmpeg::build_plan(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?;
     let handle = handle.inner().clone();
     let command = match &filtered {
         None => std::iter::once("ffmpeg".to_string())

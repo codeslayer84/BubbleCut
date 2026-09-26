@@ -239,21 +239,15 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
    pushed along by the clips before them. */
 .audio-lane { position: relative; margin-top: 8px; }
 .tl-audio { position: absolute; background: #1f3b33; border: 1px solid #2f6b58;
-  border-radius: 5px; overflow: hidden; cursor: grab; }
+  border-radius: 5px; overflow: hidden; cursor: pointer; }
+.tl-audio.muted { opacity: .45; }
+.tl-audio-muted { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: rgba(255,255,255,.7); pointer-events: none; }
 .tl-audio.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.tl-audio:active { cursor: grabbing; }
 .tl-audio .waveform { display: block; position: absolute; inset: 0; pointer-events: none; }
-.tl-audio-label { position: absolute; left: 6px; top: 2px; right: 6px; font-size: 10px;
-  color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.8);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.tl-audio-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
-.tl-audio-handle.left { left: 0; }
-.tl-audio-handle.right { right: 0; }
-.tl-audio-handle:hover { background: var(--accent); opacity: .6; }
 /* The fade wedges read as the shape of the level, same as on a text card. */
 .tl-audio-fade { position: absolute; top: 0; bottom: 0; pointer-events: none; }
 .tl-audio-fade.in { left: 0; background: linear-gradient(to right, rgba(0,0,0,.72), transparent); }
 .tl-audio-fade.out { right: 0; background: linear-gradient(to left, rgba(0,0,0,.72), transparent); }
 
-.media-bin .audio-item { background: #1f3b33; }
-.media-bin .kind { opacity: .7; margin-right: 5px; }

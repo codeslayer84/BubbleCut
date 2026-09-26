@@ -428,6 +428,46 @@ pub struct ExportClip {
     /// A generated block of colour instead of a file: a title card.
     #[serde(default)]
     pub fill_color: Option<String>,
+    /// Linear level for this clip's own sound; 1.0 leaves it alone.
+    #[serde(default = "unity_gain")]
+    pub gain: f64,
+    #[serde(default)]
+    pub fade_in: f64,
+    #[serde(default)]
+    pub fade_out: f64,
+}
+
+fn unity_gain() -> f64 {
+    1.0
+}
+
+/// One clip's audio: trimmed to length, levelled, faded, ready to concat.
+///
+/// Shared by the single-process export and the audio pass of the filtered
+/// one, so a fade cannot apply in one and not the other.
+fn clip_audio_chain(i: usize, c: &ExportClip, silence_idx: usize) -> String {
+    let len = (c.out_point - c.in_point).max(0.0);
+    let src = if c.has_audio { i } else { silence_idx };
+    let mut chain = format!(
+        "[{src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000",
+        fmt(len)
+    );
+    if (c.gain - 1.0).abs() > 1e-6 {
+        chain.push_str(&format!(",volume={:.4}", c.gain.max(0.0)));
+    }
+    if c.fade_in > 0.0 {
+        chain.push_str(&format!(",afade=t=in:st=0:d={}", fmt(c.fade_in.min(len))));
+    }
+    if c.fade_out > 0.0 {
+        let d = c.fade_out.min(len);
+        chain.push_str(&format!(
+            ",afade=t=out:st={}:d={}",
+            fmt((len - d).max(0.0)),
+            fmt(d)
+        ));
+    }
+    chain.push_str(&format!("[a{i}]"));
+    chain
 }
 
 /// A text card burned into the exported video. The PNG is rendered by the UI
@@ -586,85 +626,9 @@ pub fn build_video_decode_args(clips: &[ExportClip], s: &ExportSettings) -> Vec<
     args
 }
 
-/// Music or narration laid over the joined clip audio.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExportAudio {
-    pub path: String,
-    /// Seconds along the finished timeline.
-    pub start: f64,
-    pub in_point: f64,
-    pub out_point: f64,
-    /// Linear; 1.0 leaves the file as it is.
-    pub gain: f64,
-    pub fade_in: f64,
-    pub fade_out: f64,
-}
-
-/// Inputs and graph for the audio tracks, mixed over `into` — the label
-/// carrying the clips' own sound. Shared by the plain and the filtered export
-/// so the two cannot drift apart.
-///
-/// Returns extra ffmpeg inputs, extra graph parts, and the label to map.
-pub fn audio_mix_parts(
-    tracks: &[ExportAudio],
-    first_input_index: usize,
-    into: &str,
-) -> (Vec<String>, Vec<String>, String) {
-    if tracks.is_empty() {
-        return (Vec::new(), Vec::new(), into.to_string());
-    }
-    let mut args: Vec<String> = Vec::new();
-    let mut graph: Vec<String> = Vec::new();
-    let mut labels = format!("[{into}]");
-
-    for (i, t) in tracks.iter().enumerate() {
-        args.extend(["-ss".into(), fmt(t.in_point), "-i".into(), t.path.clone()]);
-        let len = (t.out_point - t.in_point).max(0.0);
-        let mut chain = format!(
-            "[{}:a]atrim=end={},asetpts=PTS-STARTPTS,\
-aformat=sample_rates=48000:channel_layouts=stereo",
-            first_input_index + i,
-            fmt(len)
-        );
-        if (t.gain - 1.0).abs() > 1e-6 {
-            chain.push_str(&format!(",volume={:.4}", t.gain.max(0.0)));
-        }
-        if t.fade_in > 0.0 {
-            chain.push_str(&format!(",afade=t=in:st=0:d={}", fmt(t.fade_in.min(len))));
-        }
-        if t.fade_out > 0.0 {
-            let d = t.fade_out.min(len);
-            chain.push_str(&format!(
-                ",afade=t=out:st={}:d={}",
-                fmt((len - d).max(0.0)),
-                fmt(d)
-            ));
-        }
-        if t.start > 0.0 {
-            // adelay counts in milliseconds; all=1 saves repeating the figure
-            // once per channel.
-            chain.push_str(&format!(",adelay={}:all=1", (t.start * 1000.0).round() as i64));
-        }
-        chain.push_str(&format!("[m{i}]"));
-        graph.push(chain);
-        labels.push_str(&format!("[m{i}]"));
-    }
-
-    // normalize=0 because amix otherwise divides by the number of inputs, so
-    // laying quiet music under the footage would halve the footage.
-    // duration=first keeps the output as long as the timeline, whatever the
-    // music does.
-    graph.push(format!(
-        "{labels}amix=inputs={}:duration=first:dropout_transition=0:normalize=0[amixed]",
-        tracks.len() + 1
-    ));
-    (args, graph, "amixed".to_string())
-}
-
 /// An audio-only pass over the same clips. Used by the filtered export, where
 /// the audio has to be finished on disk before the encoder opens it.
-pub fn build_audio_args(clips: &[ExportClip], tracks: &[ExportAudio], out: &Path) -> Vec<String> {
+pub fn build_audio_args(clips: &[ExportClip], out: &Path) -> Vec<String> {
     let mut args: Vec<String> = vec!["-hide_banner".into(), "-nostats".into(), "-y".into()];
     for c in clips {
         args.extend(clip_input_args(c));
@@ -681,23 +645,13 @@ pub fn build_audio_args(clips: &[ExportClip], tracks: &[ExportAudio], out: &Path
     let mut graph: Vec<String> = Vec::new();
     let mut labels = String::new();
     for (i, c) in clips.iter().enumerate() {
-        let len = (c.out_point - c.in_point).max(0.0);
-        let src = if c.has_audio { i } else { silence_idx };
-        graph.push(format!(
-            "[{src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000[a{i}]",
-            fmt(len)
-        ));
+        graph.push(clip_audio_chain(i, c, silence_idx));
         labels.push_str(&format!("[a{i}]"));
     }
     graph.push(format!("{labels}concat=n={}:v=0:a=1[aout]", clips.len()));
 
-    let (mix_args, mix_graph, aout) =
-        audio_mix_parts(tracks, clips.len() + usize::from(any_silent), "aout");
-    args.extend(mix_args);
-    graph.extend(mix_graph);
-
     args.extend(["-filter_complex".into(), graph.join(";")]);
-    args.extend(["-map".into(), format!("[{aout}]"), "-c:a".into(), "pcm_s16le".into()]);
+    args.extend(["-map".into(), "[aout]".into(), "-c:a".into(), "pcm_s16le".into()]);
     args.push(out.to_string_lossy().into_owned());
     args
 }
@@ -824,7 +778,6 @@ pub fn frame_rate(clips: &[ExportClip], s: &ExportSettings) -> f64 {
 pub fn build_plan(
     clips: &[ExportClip],
     cards: &[ExportCard],
-    tracks: &[ExportAudio],
     s: &ExportSettings,
     tmp_output: &Path,
 ) -> Result<ExportPlan, FfError> {
@@ -866,11 +819,7 @@ pub fn build_plan(
 
         graph.push(clip_video_chain(i, c, s, "yuv420p"));
 
-        let a_src = if c.has_audio { i } else { silence_idx };
-        graph.push(format!(
-            "[{a_src}:a]atrim=end={},asetpts=PTS-STARTPTS,aformat=sample_rates=48000[a{i}]",
-            fmt(len)
-        ));
+        graph.push(clip_audio_chain(i, c, silence_idx));
         concat_inputs.push_str(&format!("[v{i}][a{i}]"));
     }
     graph.push(format!(
@@ -886,12 +835,8 @@ pub fn build_plan(
     graph.extend(card_parts);
     graph.push(format!("[{last_label}]format=yuv420p[vout]"));
 
-    let (mix_args, mix_graph, aout) = audio_mix_parts(tracks, card_idx0 + cards.len(), "aout");
-    args.extend(mix_args);
-    graph.extend(mix_graph);
-
     args.extend(["-filter_complex".into(), graph.join(";")]);
-    args.extend(["-map".into(), "[vout]".into(), "-map".into(), format!("[{aout}]")]);
+    args.extend(["-map".into(), "[vout]".into(), "-map".into(), "[aout]".into()]);
 
     // Video encoder.
     args.extend(["-c:v".into(), s.encoder.clone()]);
@@ -1145,7 +1090,7 @@ mod tests {
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 6.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1159,7 +1104,7 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &cards, &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
         assert_eq!(plan.temp_files.len(), 1, "card PNG should be written to disk");
         run(&plan, &ExportHandle::default(), |_| {}).unwrap();
 
@@ -1215,7 +1160,7 @@ mod tests {
         // the clip's own yaw must not drag the card along with it.
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1229,7 +1174,7 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &cards, &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
         run(&plan, &ExportHandle::default(), |_| {}).unwrap();
 
         let (x0, x1, y0, y1) = red_bbox(&tmp.to_string_lossy(), 1.5, w, h).expect("card not found");
@@ -1269,7 +1214,7 @@ mod tests {
         let (png_base64, png_width, png_height) = card_png_base64(&dir);
         let clips = vec![ExportClip {
             path: src, in_point: 0.0, out_point: 8.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
-            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
+            has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0
         }];
         let cards = vec![ExportCard {
             png_base64, png_width, png_height,
@@ -1283,7 +1228,7 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &cards, &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &cards, &settings, &tmp).unwrap();
         run(&plan, &ExportHandle::default(), |_| {}).unwrap();
         let v = tmp.to_string_lossy().into_owned();
 
@@ -1363,7 +1308,7 @@ mod tests {
         let clips = vec![ExportClip {
             path: src, in_point: 3.0, out_point: 7.0,
             yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: true,
-            stereo_mode: StereoMode::Mono, width: 320, height: 160, fps: 10.0, fill_color: None,
+            stereo_mode: StereoMode::Mono, width: 320, height: 160, fps: 10.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0
         }];
         let out = dir.join("out.mp4");
         let tmp = dir.join("tmp.mp4");
@@ -1373,7 +1318,7 @@ mod tests {
             video_bitrate_mbps: 4.0, audio_bitrate_kbps: 128,
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: false,
         };
-        let plan = build_plan(&clips, &[], &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
         assert!((plan.total_duration - 4.0).abs() < 1e-6);
         run(&plan, &ExportHandle::default(), |_| {}).unwrap();
 
@@ -1402,7 +1347,7 @@ mod tests {
         let footage = ExportClip {
             path: src, in_point: 0.0, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0,
             has_audio: true, stereo_mode: StereoMode::Mono,
-            width: 640, height: 320, fps: 30.0, fill_color: None,
+            width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0
         };
         let title = ExportClip {
             path: String::new(), in_point: 0.0, out_point: 1.5,
@@ -1410,6 +1355,7 @@ mod tests {
             has_audio: false, stereo_mode: StereoMode::Mono,
             width: 640, height: 320, fps: 30.0,
             fill_color: Some("#000000".into()),
+            gain: 1.0, fade_in: 0.0, fade_out: 0.0,
         };
 
         let out = dir.join("out.mp4");
@@ -1422,7 +1368,7 @@ mod tests {
         };
         // Title first, then footage.
         let clips = vec![title, footage];
-        let plan = build_plan(&clips, &[], &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
         assert!((plan.total_duration - 3.5).abs() < 1e-6);
         run(&plan, &ExportHandle::default(), |_| {}).unwrap();
 
@@ -1452,8 +1398,8 @@ mod tests {
         let a = gen(&dir, "a.mp4", true, 4);
         let b = gen(&dir, "b.mp4", false, 4);
         let clips = vec![
-            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None },
-            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None },
+            ExportClip { path: a, in_point: 1.0, out_point: 3.0, yaw: 90.0, pitch: 0.0, roll: 0.0, has_audio: true, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0 },
+            ExportClip { path: b, in_point: 0.5, out_point: 2.0, yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false, stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0 },
         ];
         let encoders = available_encoders().unwrap();
         let encoder = if encoders.iter().any(|e| e == "libx264") { "libx264" } else { &encoders[0] }.to_string();
@@ -1463,7 +1409,7 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: true,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &[], &[], &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
         assert!((plan.total_duration - 3.5).abs() < 1e-6);
 
         let handle = ExportHandle::default();
@@ -1496,37 +1442,25 @@ mod tests {
             .unwrap_or(-100.0)
     }
 
-    /// The point of the audio lane: a music file dropped at 2s has to be
-    /// silent before 2s and audible after, mixed over whatever the clips are
-    /// already doing. Asserting on the filter string would not catch adelay
-    /// counting in the wrong unit, or amix halving everything.
+
+    /// Per-clip level and fades have to survive into the file. Asserting on
+    /// the filter string would not catch `volume` being applied to the wrong
+    /// clip, or a fade landing at the wrong end.
     #[test]
-    fn an_audio_track_lands_at_its_offset_on_the_timeline() {
-        let dir = std::env::temp_dir().join(format!("bubblecut-aud-{}", uuid::Uuid::new_v4()));
+    fn a_clips_own_audio_can_be_levelled_and_faded() {
+        let dir = std::env::temp_dir().join(format!("bubblecut-clipaud-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
+        let src = gen(&dir, "tone.mp4", true, 4);
 
-        // Silent footage, so anything heard came from the track.
-        let video = gen(&dir, "silent.mp4", false, 6);
-        let music = dir.join("music.wav");
-        assert!(
-            Command::new(ffmpeg())
-                .args(["-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=1000:duration=2"])
-                .arg(&music)
-                .status()
-                .unwrap()
-                .success()
-        );
-
-        let clips = vec![ExportClip {
-            path: video, in_point: 0.0, out_point: 6.0,
-            yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: false,
-            stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0, fill_color: None,
-        }];
-        let tracks = vec![ExportAudio {
-            path: music.to_string_lossy().into_owned(),
-            start: 2.0, in_point: 0.0, out_point: 2.0,
-            gain: 1.0, fade_in: 0.0, fade_out: 0.0,
-        }];
+        let loud = ExportClip {
+            path: src.clone(), in_point: 0.0, out_point: 3.0,
+            yaw: 0.0, pitch: 0.0, roll: 0.0, has_audio: true,
+            stereo_mode: StereoMode::Mono, width: 640, height: 320, fps: 30.0,
+            fill_color: None, gain: 1.0, fade_in: 0.0, fade_out: 0.0,
+        };
+        // Second clip is turned right down, and fades in over its first second.
+        let quiet = ExportClip { gain: 0.05, fade_in: 1.0, ..loud.clone() };
+        let clips = vec![loud, quiet];
 
         let out = dir.join("out.mp4");
         let settings = ExportSettings {
@@ -1536,25 +1470,23 @@ mod tests {
             stereo_mode: StereoMode::Mono, faststart: true, inject_spherical: false,
         };
         let tmp = dir.join("tmp.mp4");
-        let plan = build_plan(&clips, &[], &tracks, &settings, &tmp).unwrap();
+        let plan = build_plan(&clips, &[], &settings, &tmp).unwrap();
         assert!(Command::new(ffmpeg()).args(&plan.args).status().unwrap().success());
-        std::fs::rename(&tmp, &out).ok();
 
-        let path = out.to_string_lossy().into_owned();
-        let before = mean_db(&path, 0.2, 1.8);
-        let during = mean_db(&path, 2.2, 3.8);
-        let after = mean_db(&path, 4.2, 5.8);
+        let v = tmp.to_string_lossy().into_owned();
+        let first = mean_db(&v, 0.3, 2.7);   // untouched
+        let faded = mean_db(&v, 3.05, 3.35); // start of the second clip's fade
+        let second = mean_db(&v, 4.3, 5.7);  // second clip at its own level
 
-        assert!(before < -60.0, "should be silent before the track: {before} dB");
-        // A -18 dBFS sine lands near -21 dB RMS; the bar is set well below
-        // that and well above the -60 the silence has to clear.
-        assert!(during > -35.0, "the track should be audible at its offset: {during} dB");
-        assert!(after < -60.0, "should be silent again once it ends: {after} dB");
-
-        // The output must still run the full length of the footage, not stop
-        // when the music does.
-        let info = probe(&path).unwrap();
-        assert!(info.duration > 5.5, "mix truncated the timeline: {}", info.duration);
+        assert!(first > -30.0, "first clip should be untouched: {first} dB");
+        assert!(
+            second < first - 15.0,
+            "gain 0.05 should be far quieter: {second} dB against {first} dB"
+        );
+        assert!(
+            faded < second - 5.0,
+            "the fade should start below the clip's own level: {faded} dB against {second} dB"
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1588,6 +1520,20 @@ mod tests {
         assert!(loud > 0.05, "second half should carry the tone, quietest bucket {loud}");
         assert!(loud > quiet * 10.0, "no contrast between silence and tone");
         assert!(peaks.iter().all(|p| (0.0..=1.0).contains(p)));
+
+        // The lane draws footage, not sidecar audio files, so the same has to
+        // hold for the audio inside an mp4.
+        let video = gen(&dir, "tone.mp4", true, 3);
+        let vp = audio_peaks(&video, 20).unwrap();
+        assert_eq!(vp.len(), 20);
+        assert!(
+            vp[5..15].iter().all(|p| *p > 0.05),
+            "no waveform came out of the video's audio: {vp:?}"
+        );
+
+        // A silent video still answers, rather than failing the lane.
+        let silent = gen(&dir, "silent.mp4", false, 2);
+        assert!(audio_peaks(&silent, 10).is_err() || audio_peaks(&silent, 10).unwrap().len() == 10);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

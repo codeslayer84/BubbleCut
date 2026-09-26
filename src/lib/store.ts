@@ -1,9 +1,7 @@
 import { create } from "zustand";
 import { loadPresets, savePresets, type FilterPreset } from "./presets";
 import { clampPanel, loadPanels, PANEL_DEFAULTS, savePanels, type PanelSizes } from "./layout";
-import type {
-  AudioTrack, Clip, ExportSettings, MediaInfo, ProjectFile, TextCard,
-} from "./types";
+import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -62,9 +60,6 @@ interface State {
   media: Record<string, MediaInfo>;
   clips: Clip[];
   cards: TextCard[];
-  /** Music and narration, positioned in absolute timeline seconds. */
-  audio: AudioTrack[];
-  selectedAudioId: string | null;
   previewFilters: boolean;
   /** Ranges of the timeline to export, in timeline seconds. Empty = all of it. */
   selections: TimeRange[];
@@ -76,10 +71,6 @@ interface State {
   /** All clips picked out for export. The last one is selectedClipId. */
   selectedClipIds: string[];
   selectedCardId: string | null;
-  addAudio: (mediaPath: string, duration: number, start: number) => void;
-  updateAudio: (id: string, patch: Partial<AudioTrack>) => void;
-  removeAudio: (id: string) => void;
-  selectAudio: (id: string | null) => void;
   playhead: number;
   playing: boolean;
   view: View;
@@ -141,8 +132,6 @@ export const useStore = create<State>((set, get) => ({
   selectedClipId: null,
   selectedClipIds: [],
   selectedCardId: null,
-  audio: [],
-  selectedAudioId: null,
   playhead: 0,
   playing: false,
   view: { lon: 0, lat: 0, fov: 90 },
@@ -161,8 +150,6 @@ export const useStore = create<State>((set, get) => ({
       return {
         media,
         clips: s.clips.filter((c) => c.mediaPath !== path),
-        // A track whose file has gone would silently fail at export.
-        audio: s.audio.filter((t) => t.mediaPath !== path),
         dirty: true,
       };
     }),
@@ -375,45 +362,6 @@ export const useStore = create<State>((set, get) => ({
         dirty: true,
       };
     }),
-  addAudio: (mediaPath, duration, start) =>
-    set((s) => {
-      const t: AudioTrack = {
-        id: newId(),
-        mediaPath,
-        start: Math.max(0, start),
-        inPoint: 0,
-        outPoint: duration,
-        gain: 1,
-        fadeIn: 0,
-        fadeOut: 0,
-      };
-      return { audio: [...s.audio, t], selectedAudioId: t.id, dirty: true };
-    }),
-  updateAudio: (id, patch) =>
-    set((s) => ({
-      audio: s.audio.map((t) => {
-        if (t.id !== id) return t;
-        const next = { ...t, ...patch };
-        next.start = Math.max(0, next.start);
-        next.inPoint = Math.max(0, next.inPoint);
-        next.outPoint = Math.max(next.inPoint + 0.05, next.outPoint);
-        // Fades cannot overlap, or the track never reaches full level.
-        const half = (next.outPoint - next.inPoint) / 2;
-        next.fadeIn = Math.min(Math.max(0, next.fadeIn), half);
-        next.fadeOut = Math.min(Math.max(0, next.fadeOut), half);
-        next.gain = Math.min(Math.max(0, next.gain), 4);
-        return next;
-      }),
-      dirty: true,
-    })),
-  removeAudio: (id) =>
-    set((s) => ({
-      audio: s.audio.filter((t) => t.id !== id),
-      selectedAudioId: s.selectedAudioId === id ? null : s.selectedAudioId,
-      dirty: true,
-    })),
-  selectAudio: (id) => set({ selectedAudioId: id }),
-
   addCard: (card) => set((s) => ({ cards: [...s.cards, card], selectedCardId: card.id, dirty: true })),
   updateCard: (id, patch) =>
     set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)), dirty: true })),
@@ -426,7 +374,7 @@ export const useStore = create<State>((set, get) => ({
   selectCard: (id) => set({ selectedCardId: id }),
   updateClip: (id, patch) =>
     set((s) => {
-      const clips = s.clips.map((c) => (c.id === id ? { ...c, ...patch } : c));
+      const clips = s.clips.map((c) => (c.id === id ? clampClipAudio({ ...c, ...patch }) : c));
       return { clips, cards: syncTitleCards(clips, s.cards), dirty: true };
     }),
   removeClip: (id) =>
@@ -471,8 +419,7 @@ export const useStore = create<State>((set, get) => ({
       }
       return {};
     }),
-  selectClip: (id) =>
-    set({ selectedClipId: id, selectedClipIds: id ? [id] : [], selectedAudioId: null }),
+  selectClip: (id) => set({ selectedClipId: id, selectedClipIds: id ? [id] : [] }),
 
   // Cmd- or Ctrl-click: add or remove one clip.
   panels: loadPanels(),
@@ -499,7 +446,6 @@ export const useStore = create<State>((set, get) => ({
       return {
         selectedClipId: has ? (ids.length ? ids[ids.length - 1] : null) : id,
         selectedClipIds: ids,
-        selectedAudioId: null,
       };
     }),
 
@@ -536,8 +482,6 @@ export const useStore = create<State>((set, get) => ({
       media: Object.fromEntries(p.media.map((m) => [m.path, m])),
       // Older projects predate fades, so the fields may be missing at runtime.
       cards: (p.cards ?? []).map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
-      audio: p.audio ?? [],
-      selectedAudioId: null,
       // Filters used to be timeline-wide; an older project's chain becomes
       // every clip's chain so nothing silently stops being applied.
       clips: p.clips.map((c) => ({
@@ -577,6 +521,20 @@ export const clipLength = (c: Clip) => Math.max(0, c.outPoint - c.inPoint);
  * clips about: a card owned by a title has no independent timing, so its
  * start and end are simply wherever that clip now sits.
  */
+/**
+ * Keep a clip's audio settings inside what the clip can express. Trimming a
+ * clip down to a second must not leave a four-second fade behind, and the
+ * two fades must not overlap or the level never reaches the middle.
+ */
+function clampClipAudio(c: Clip): Clip {
+  const half = Math.max(0, (c.outPoint - c.inPoint) / 2);
+  const gain = c.audioGain === undefined ? undefined : Math.min(Math.max(0, c.audioGain), 4);
+  const fadeIn = c.audioFadeIn === undefined ? undefined : Math.min(Math.max(0, c.audioFadeIn), half);
+  const fadeOut = c.audioFadeOut === undefined ? undefined : Math.min(Math.max(0, c.audioFadeOut), half);
+  if (gain === c.audioGain && fadeIn === c.audioFadeIn && fadeOut === c.audioFadeOut) return c;
+  return { ...c, audioGain: gain, audioFadeIn: fadeIn, audioFadeOut: fadeOut };
+}
+
 export function syncTitleCards(clips: Clip[], cards: TextCard[]): TextCard[] {
   const place = new Map<string, { start: number; end: number }>();
   let at = 0;
@@ -648,7 +606,6 @@ export function toProjectFile(s: State): ProjectFile {
     media: Object.values(s.media).map(({ blobUrl: _b, ...m }) => m),
     clips: s.clips,
     cards: s.cards,
-    audio: s.audio,
     exportSettings: s.exportSettings,
   };
 }

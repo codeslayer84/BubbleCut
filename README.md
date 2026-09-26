@@ -24,15 +24,12 @@ decode/encode step.
   Text cards appear on their own lane beneath the clips, where they can be
   dragged along the timeline or have either end pulled. Overlapping cards
   stack onto separate rows, and the darkened wedges show their fades.
-- **Audio lane**: import music or narration and drop it at the playhead. It
-  carries its own position rather than being pushed along by the clips, so it
-  runs across cuts. Drag to move, pull either end to trim (trimming the head
-  re-cuts the file, so the sound stays where you put it), with level in dB and
-  fades per track. Waveforms are drawn from peaks ffmpeg decodes once per
-  file. On export the lane is mixed over the clips' own sound with
-  `amix ... :normalize=0`, so laying music under the footage does not halve
-  the footage. Exporting a marked range or a single clip re-cuts the audio to
-  match.
+- **Audio lane**: each clip's own sound, drawn as a waveform under it —
+  nothing to import, the audio comes out of the video file. The lane follows
+  the clips as they are trimmed and reordered. Level in dB per clip (with a
+  mute), plus fade in and out, applied on export with `volume` and `afade`.
+  Waveforms come from peaks ffmpeg decodes once per file. Clips with no audio
+  and title cards simply have no lane entry.
 - Per-clip **orientation** (yaw/pitch/roll) — set where the viewer starts
   looking. "Set current view as front" takes whatever is under the reticle.
   Preview matches ffmpeg's `v360` filter exactly.

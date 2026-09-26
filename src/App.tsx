@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { AudioPreview } from "./components/AudioPreview";
 import { Splitter } from "./components/Splitter";
 import { Viewer } from "./components/Viewer";
 import { Timeline } from "./components/Timeline";
@@ -130,7 +129,6 @@ export default function App() {
         </aside>
       </main>
 
-      <AudioPreview />
       <FfmpegGate />
       {showAbout && <About onClose={() => setShowAbout(false)} />}
     </div>

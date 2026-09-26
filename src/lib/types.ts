@@ -40,6 +40,13 @@ export interface Clip {
    * work the same as anywhere else.
    */
   fill?: { color: string };
+  /**
+   * This clip's own sound. Linear gain, 1 = as recorded. Optional because
+   * projects written before the audio lane existed have no opinion.
+   */
+  audioGain?: number;
+  audioFadeIn?: number;
+  audioFadeOut?: number;
 }
 
 export interface TextCard {
@@ -73,25 +80,6 @@ export interface TextCard {
    * edit earlier in the timeline.
    */
   ownerClipId?: string;
-}
-
-/**
- * Music or narration on the audio lane.
- *
- * Unlike a video clip, which is positioned by the clips before it, this
- * carries its own `start` — the whole point is to run across cuts.
- */
-export interface AudioTrack {
-  id: string;
-  mediaPath: string;
-  /** Seconds along the timeline. */
-  start: number;
-  inPoint: number;
-  outPoint: number;
-  /** Linear, 1 = as recorded. */
-  gain: number;
-  fadeIn: number;
-  fadeOut: number;
 }
 
 /** One filter in the chain, with its parameter values. */
@@ -159,6 +147,4 @@ export interface ProjectFile {
   cards?: TextCard[];
   filters?: FilterInstance[];
   exportSettings: Partial<ExportSettings>;
-  /** Absent in files written before the audio lane existed. */
-  audio?: AudioTrack[];
 }
