@@ -3,7 +3,9 @@ mod gpufilters;
 mod pipeline;
 mod spherical;
 
-use ffmpeg::{ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode};
+use ffmpeg::{
+    ExportAudio, ExportCard, ExportClip, ExportHandle, ExportSettings, MediaInfo, StereoMode,
+};
 use gpufilters::FilterSpec;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -97,12 +99,20 @@ fn shell_quote(a: &str) -> String {
     }
 }
 
+/// Waveform envelope for an audio file, for drawing it on the timeline.
+#[tauri::command]
+fn audio_peaks(path: String, buckets: usize) -> Result<Vec<f32>, String> {
+    ffmpeg::audio_peaks(&path, buckets).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn start_export(
     app: AppHandle,
     handle: State<'_, ExportHandle>,
     clips: Vec<ExportClip>,
     cards: Vec<ExportCard>,
+    // Music or narration laid over the clips' own sound.
+    tracks: Vec<ExportAudio>,
     // One filter chain per clip, in the same order as `clips`.
     filters: Vec<Vec<FilterSpec>>,
     settings: ExportSettings,
@@ -122,9 +132,9 @@ fn start_export(
     let filtered = if !any_filters {
         None
     } else {
-        Some(pipeline::build(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?)
+        Some(pipeline::build(&clips, &cards, &tracks, &settings, &tmp).map_err(|e| e.to_string())?)
     };
-    let plan = ffmpeg::build_plan(&clips, &cards, &settings, &tmp).map_err(|e| e.to_string())?;
+    let plan = ffmpeg::build_plan(&clips, &cards, &tracks, &settings, &tmp).map_err(|e| e.to_string())?;
     let handle = handle.inner().clone();
     let command = match &filtered {
         None => std::iter::once("ffmpeg".to_string())
@@ -267,6 +277,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ffmpeg_info,
             probe_media,
+            audio_peaks,
             list_filters,
             start_export,
             cancel_export,

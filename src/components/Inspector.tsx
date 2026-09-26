@@ -14,13 +14,84 @@ function Angle({ label, value, onChange, min = -180, max = 180 }: {
   );
 }
 
+/** Level and fades for whichever audio track is selected on the lane. */
+function AudioInspector({ id }: { id: string }) {
+  const track = useStore((s) => s.audio.find((t) => t.id === id))!;
+  const media = useStore((s) => s.media);
+  const { updateAudio, removeAudio, selectAudio, setPlayhead } = useStore.getState();
+  const m = media[track.mediaPath];
+  const len = track.outPoint - track.inPoint;
+  // Decibels are what people think in; the export wants a linear multiplier.
+  const db = track.gain <= 0.0001 ? -60 : Math.round(20 * Math.log10(track.gain) * 10) / 10;
+
+  return (
+    <div className="inspector">
+      <h3>Audio track</h3>
+      <div className="hint">{m?.name ?? track.mediaPath}</div>
+
+      <label className="field">
+        <span>Level: {db <= -60 ? "silent" : `${db > 0 ? "+" : ""}${db} dB`}</span>
+        <input
+          type="range" min={-40} max={12} step={0.5}
+          value={Math.max(-40, Math.min(12, db))}
+          onChange={(e) => updateAudio(id, { gain: Math.pow(10, +e.target.value / 20) })}
+        />
+      </label>
+      {db > 0 && (
+        <div className="hint">
+          Boosted tracks preview quieter than they export — the preview cannot go
+          above unity. The export applies the full {db > 0 ? "+" : ""}{db} dB.
+        </div>
+      )}
+      <div className="row">
+        <button onClick={() => updateAudio(id, { gain: 1 })} disabled={Math.abs(track.gain - 1) < 1e-6}>
+          Unity
+        </button>
+        <span className="hint">
+          Starts at {fmtTime(track.start)}, runs {fmtTime(len)}
+        </span>
+      </div>
+
+      <div className="two">
+        <label className="field">
+          <span>Fade in (s)</span>
+          <input type="number" min={0} max={len / 2} step={0.1} value={track.fadeIn}
+            onChange={(e) => updateAudio(id, { fadeIn: +e.target.value || 0 })} />
+        </label>
+        <label className="field">
+          <span>Fade out (s)</span>
+          <input type="number" min={0} max={len / 2} step={0.1} value={track.fadeOut}
+            onChange={(e) => updateAudio(id, { fadeOut: +e.target.value || 0 })} />
+        </label>
+      </div>
+
+      <div className="row">
+        <button onClick={() => setPlayhead(track.start)}>Go to start</button>
+        <button onClick={() => updateAudio(id, { start: useStore.getState().playhead })}>
+          Move here
+        </button>
+        <span className="spacer" />
+        <button className="danger" onClick={() => { removeAudio(id); selectAudio(null); }}>
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Inspector() {
   const clips = useStore((s) => s.clips);
   const media = useStore((s) => s.media);
+  const selectedAudioId = useStore((s) => s.selectedAudioId);
+  const hasAudioSel = useStore((s) => s.audio.some((t) => t.id === s.selectedAudioId));
   const selectedId = useStore((s) => s.selectedClipId);
   const playhead = useStore((s) => s.playhead);
   const view = useStore((s) => s.view);
   const { updateClip, setView, setPlayhead } = useStore.getState();
+
+  // An audio track that has just been clicked outranks whatever clip the
+  // playhead happens to be over.
+  if (selectedAudioId && hasAudioSel) return <AudioInspector id={selectedAudioId} />;
 
   const clip = clips.find((c) => c.id === selectedId) ?? clipAt(clips, playhead)?.clip ?? null;
   if (!clip) return <div className="inspector empty">Select a clip to edit its orientation and trim.</div>;

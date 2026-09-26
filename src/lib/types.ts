@@ -1,6 +1,10 @@
 export type StereoMode = "mono" | "top-bottom" | "left-right";
 
+export type MediaKind = "video" | "audio";
+
 export interface MediaInfo {
+  /** Audio-only files sit in the same bin as the footage. */
+  kind: MediaKind;
   path: string;
   name: string;
   duration: number;
@@ -71,6 +75,25 @@ export interface TextCard {
   ownerClipId?: string;
 }
 
+/**
+ * Music or narration on the audio lane.
+ *
+ * Unlike a video clip, which is positioned by the clips before it, this
+ * carries its own `start` — the whole point is to run across cuts.
+ */
+export interface AudioTrack {
+  id: string;
+  mediaPath: string;
+  /** Seconds along the timeline. */
+  start: number;
+  inPoint: number;
+  outPoint: number;
+  /** Linear, 1 = as recorded. */
+  gain: number;
+  fadeIn: number;
+  fadeOut: number;
+}
+
 /** One filter in the chain, with its parameter values. */
 export interface FilterInstance {
   id: string;
@@ -136,4 +159,6 @@ export interface ProjectFile {
   cards?: TextCard[];
   filters?: FilterInstance[];
   exportSettings: Partial<ExportSettings>;
+  /** Absent in files written before the audio lane existed. */
+  audio?: AudioTrack[];
 }

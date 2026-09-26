@@ -8,7 +8,7 @@
  * working unchanged, because it only ever sees a shorter list of clips.
  */
 import { clipLength } from "./store";
-import type { Clip, TextCard } from "./types";
+import type { AudioTrack, Clip, TextCard } from "./types";
 
 export interface Range {
   start: number;
@@ -16,6 +16,7 @@ export interface Range {
 }
 
 export interface SlicedTimeline {
+  audio: AudioTrack[];
   clips: Clip[];
   cards: TextCard[];
 }
@@ -71,16 +72,56 @@ function sliceOne(clips: Clip[], range: Range): Clip[] {
  * times rebased so the export starts at zero. No ranges means the whole
  * timeline, untouched.
  */
+/**
+ * The parts of `audio` that fall inside `from`..`to`, moved by `shift`.
+ *
+ * A track moves like a card, but its file has to be re-cut as well: losing
+ * the first second off the front means starting a second later into the file,
+ * or the sound slides against the picture. Used both for exporting a marked
+ * range and for exporting one clip on its own.
+ */
+export function sliceAudio(
+  audio: AudioTrack[],
+  from: number,
+  to: number,
+  shift: number,
+): AudioTrack[] {
+  const out: AudioTrack[] = [];
+  for (const t of audio) {
+    const tEnd = t.start + (t.outPoint - t.inPoint);
+    if (tEnd <= from || t.start >= to) continue;
+    const a = Math.max(t.start, from);
+    const b = Math.min(tEnd, to);
+    const len = b - a;
+    if (len <= 0.001) continue;
+    const headCut = a - t.start;
+    const tailCut = tEnd - b;
+    const half = len / 2;
+    out.push({
+      ...t,
+      start: a + shift,
+      inPoint: t.inPoint + headCut,
+      outPoint: t.inPoint + headCut + len,
+      // A fade the cut ate no longer has anything to act on.
+      fadeIn: Math.min(Math.max(0, t.fadeIn - headCut), half),
+      fadeOut: Math.min(Math.max(0, t.fadeOut - tailCut), half),
+    });
+  }
+  return out;
+}
+
 export function sliceTimeline(
   clips: Clip[],
   cards: TextCard[],
+  audio: AudioTrack[],
   ranges: Range[],
 ): SlicedTimeline {
   const merged = normalizeRanges(ranges);
-  if (merged.length === 0) return { clips, cards };
+  if (merged.length === 0) return { clips, cards, audio };
 
   const outClips: Clip[] = [];
   const outCards: TextCard[] = [];
+  const outAudio: AudioTrack[] = [];
   let written = 0; // how far into the exported timeline we are
 
   for (const range of merged) {
@@ -96,10 +137,12 @@ export function sliceTimeline(
       if (end - start > 0.001) outCards.push({ ...c, start, end });
     }
 
+    outAudio.push(...sliceAudio(audio, range.start, range.end, shift));
+
     written += piece.reduce((n, c) => n + clipLength(c), 0);
   }
 
-  return { clips: outClips, cards: outCards };
+  return { clips: outClips, cards: outCards, audio: outAudio };
 }
 
 /** Length of what would be exported. */

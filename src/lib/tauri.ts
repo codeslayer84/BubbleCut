@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cardPngBase64 } from "./cardRender";
 import { sliceTimeline, type Range } from "./selection";
 import type {
+  AudioTrack,
   Clip,
   ExportDone,
   ExportSettings,
@@ -32,6 +33,9 @@ export interface FfmpegInfo {
 
 export const ffmpegInfo = () => invoke<FfmpegInfo>("ffmpeg_info");
 export const probeMedia = (path: string) => invoke<MediaInfo>("probe_media", { path });
+/** Waveform envelope: `buckets` peaks in 0..1, for drawing the audio lane. */
+export const audioPeaks = (path: string, buckets: number) =>
+  invoke<number[]>("audio_peaks", { path, buckets });
 export const checkSpherical = (path: string) =>
   invoke<SphericalCheck>("check_spherical", { path });
 export const cancelExport = () => invoke<boolean>("cancel_export");
@@ -50,10 +54,11 @@ export function startExport(
   allCards: TextCard[],
   settings: ExportSettings,
   ranges: Range[] = [],
+  allAudio: AudioTrack[] = [],
 ) {
   // Slicing here keeps the whole pipeline — per-clip filters, card overlays,
   // the concat — working on an ordinary shorter timeline.
-  const { clips, cards } = sliceTimeline(allClips, allCards, ranges);
+  const { clips, cards, audio } = sliceTimeline(allClips, allCards, allAudio, ranges);
   const firstReal = clips.map((c) => media[c.mediaPath]).find(Boolean);
   const fallback = {
     width: firstReal?.width ?? 3840,
@@ -101,9 +106,19 @@ export function startExport(
     });
   // One chain per clip, in the same order the clips are sent.
   const exportFilters = clips.map((c) => c.filters.map((f) => ({ name: f.name, params: f.params })));
+  const exportTracks = audio.map((t) => ({
+    path: t.mediaPath,
+    start: t.start,
+    inPoint: t.inPoint,
+    outPoint: t.outPoint,
+    gain: t.gain,
+    fadeIn: t.fadeIn,
+    fadeOut: t.fadeOut,
+  }));
   return invoke<void>("start_export", {
     clips: exportClips,
     cards: exportCards,
+    tracks: exportTracks,
     filters: exportFilters,
     settings,
   });
@@ -121,6 +136,7 @@ export function runExport(
   settings: ExportSettings,
   ranges: Range[],
   onProgress: (p: Progress) => void,
+  audio: AudioTrack[] = [],
 ): Promise<ExportDone> {
   return new Promise((resolve, reject) => {
     const stop = onExportEvents({
@@ -128,7 +144,7 @@ export function runExport(
       done: (d) => { stop(); resolve(d); },
       error: (m) => { stop(); reject(new Error(m)); },
     });
-    startExport(clips, media, cards, settings, ranges).catch((e) => {
+    startExport(clips, media, cards, settings, ranges, audio).catch((e) => {
       stop();
       reject(e instanceof Error ? e : new Error(String(e)));
     });
@@ -154,6 +170,19 @@ export function onExportEvents(handlers: {
 export function mediaUrl(m: MediaInfo): string {
   if (m.blobUrl) return m.blobUrl;
   return convertFileSrc(m.path);
+}
+
+/** Open-file dialog for music or narration. */
+export async function pickAudioFiles(): Promise<string[]> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({
+    multiple: true,
+    filters: [
+      { name: "Audio", extensions: ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aiff", "caf"] },
+    ],
+  });
+  if (!res) return [];
+  return Array.isArray(res) ? res : [res];
 }
 
 /** Open-file dialog (Tauri) — returns absolute paths. */
@@ -204,6 +233,7 @@ export function probeInBrowser(file: File): Promise<MediaInfo> {
     v.onloadedmetadata = () => {
       const ar = v.videoWidth / v.videoHeight;
       resolve({
+        kind: "video",
         path: file.name,
         name: file.name,
         duration: v.duration,

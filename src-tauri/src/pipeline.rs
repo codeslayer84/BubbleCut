@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::ffmpeg::{
+use crate::ffmpeg::{ExportAudio, 
     self, ExportCard, ExportClip, ExportHandle, ExportSettings, FfError, Progress,
 };
 use crate::gpufilters::{FilterGpu, FilterSpec};
@@ -53,12 +53,13 @@ pub struct FilteredPlan {
 pub fn build(
     clips: &[ExportClip],
     cards: &[ExportCard],
+    tracks: &[ExportAudio],
     s: &ExportSettings,
     tmp_output: &Path,
 ) -> Result<FilteredPlan, FfError> {
     // The video half is assembled from the same pieces the single-process
     // plan uses, so trimming, reorientation and card layout stay identical.
-    let base = ffmpeg::build_plan(clips, &[], s, tmp_output)?;
+    let base = ffmpeg::build_plan(clips, &[], &[], s, tmp_output)?;
     let (width, height) = ffmpeg::frame_size(clips, s);
     let fps = ffmpeg::frame_rate(clips, s);
     let audio_path = tmp_output.with_extension("audio.wav");
@@ -70,7 +71,7 @@ pub fn build(
         .iter()
         .position(|a| a == "-c:v")
         .ok_or_else(|| FfError::Other("base plan has no encoder".into()))?;
-    let audio_args = ffmpeg::build_audio_args(clips, &audio_path);
+    let audio_args = ffmpeg::build_audio_args(clips, tracks, &audio_path);
     let decode_args = ffmpeg::build_video_decode_args(clips, s);
 
     // Encode: raw frames in, cards on top of the filtered picture, then the
@@ -351,7 +352,7 @@ mod tests {
             st.video_bitrate_mbps = 60.0;
 
             let filters = vec![vec![FilterSpec { name: filter.into(), params: HashMap::new() }]];
-            let plan = build(&clips, &[], &st, &tmp).unwrap();
+            let plan = build(&clips, &[], &[], &st, &tmp).unwrap();
             let started = std::time::Instant::now();
             run(&plan, &filters, &ExportHandle::default(), |_| {}).unwrap();
             let elapsed = started.elapsed().as_secs_f64();
@@ -384,7 +385,7 @@ mod tests {
             vec![],
             vec![FilterSpec { name: "Grayscale".into(), params: HashMap::new() }],
         ];
-        let plan = build(&clips, &[], &settings(&out), &tmp).unwrap();
+        let plan = build(&clips, &[], &[], &settings(&out), &tmp).unwrap();
         assert_eq!(plan.clip_bounds, vec![60, 120]);
         run(&plan, &chains, &ExportHandle::default(), |_| {}).unwrap();
 
@@ -420,7 +421,7 @@ mod tests {
 
         let clips = vec![clip(src)];
         let filters = vec![vec![FilterSpec { name: "Grayscale".into(), params: HashMap::new() }]];
-        let plan = build(&clips, &[], &settings(&out), &tmp).unwrap();
+        let plan = build(&clips, &[], &[], &settings(&out), &tmp).unwrap();
         assert_eq!((plan.width, plan.height), (640, 320));
         assert_eq!(plan.total_frames, 60);
 

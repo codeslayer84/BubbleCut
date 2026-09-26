@@ -1,4 +1,5 @@
 import { Splitter } from "./Splitter";
+import { Waveform } from "./Waveform";
 import { PANEL_LIMITS } from "../lib/layout";
 import { useEffect, useRef, useState } from "react";
 import { cardOpacity } from "../lib/cardRender";
@@ -21,6 +22,7 @@ export function Timeline() {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
     selectCard, updateCard, setRightTab,
     addSelection, updateSelection, removeSelection, clearSelections, setPanel, resetPanel,
+    selectAudio, updateAudio,
     toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
@@ -89,6 +91,42 @@ export function Timeline() {
   };
 
   // Dragging a card along the timeline, or taking hold of one of its ends.
+  const startAudioDrag = (e: React.PointerEvent, id: string, mode: "move" | "start" | "end") => {
+    e.stopPropagation();
+    e.preventDefault();
+    setPlaying(false);
+    selectAudio(id);
+    const t = useStore.getState().audio.find((a) => a.id === id)!;
+    const x0 = e.clientX;
+    const orig = { start: t.start, inPoint: t.inPoint, outPoint: t.outPoint };
+    const fileLen = media[t.mediaPath]?.duration ?? orig.outPoint;
+
+    const move = (ev: PointerEvent) => {
+      const dt = (ev.clientX - x0) / pxPerSec;
+      if (mode === "move") {
+        updateAudio(id, { start: Math.max(0, orig.start + dt) });
+      } else if (mode === "start") {
+        // Trimming the head eats into the file and moves the track along by
+        // the same amount, so the sound under the cursor stays where it is.
+        // Leftwards is limited by how much file lies before the in point and
+        // by the start of the timeline; rightwards by leaving something left.
+        const lo = -Math.min(orig.inPoint, orig.start);
+        const hi = orig.outPoint - orig.inPoint - MIN_CLIP;
+        const d = Math.max(lo, Math.min(hi, dt));
+        updateAudio(id, { start: orig.start + d, inPoint: orig.inPoint + d });
+      } else {
+        const d = Math.max(orig.inPoint + MIN_CLIP - orig.outPoint, Math.min(fileLen - orig.outPoint, dt));
+        updateAudio(id, { outPoint: orig.outPoint + d });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const startCardDrag = (e: React.PointerEvent, id: string, mode: "move" | "start" | "end") => {
     e.stopPropagation();
     e.preventDefault();
@@ -187,6 +225,31 @@ export function Timeline() {
   })();
   const laneHeight = cardRows.count * CARD_ROW_H + (cardRows.count - 1) * CARD_ROW_GAP;
 
+  const audio = useStore((s) => s.audio);
+  const selectedAudioId = useStore((s) => s.selectedAudioId);
+  const AUDIO_ROW_H = 40;
+  // Tracks that overlap share the lane on separate rows, same as cards.
+  const audioRows = (() => {
+    const placed = new Map<string, number>();
+    const rowEnds: number[] = [];
+    for (const t of [...audio].sort((a, b) => a.start - b.start)) {
+      const end = t.start + (t.outPoint - t.inPoint);
+      let row = rowEnds.findIndex((e) => t.start >= e - 1e-6);
+      if (row === -1) {
+        row = rowEnds.length;
+        rowEnds.push(0);
+      }
+      rowEnds[row] = end;
+      placed.set(t.id, row);
+    }
+    return { placed, count: Math.max(rowEnds.length, 1) };
+  })();
+  const audioLaneH = audio.length ? audioRows.count * AUDIO_ROW_H + (audioRows.count - 1) * 3 : 0;
+  // Music can run past the last clip. The ruler still measures the video, but
+  // the scrollable area has to reach the end of the sound or its tail cannot
+  // be grabbed.
+  const contentEnd = audio.reduce((m, t) => Math.max(m, t.start + (t.outPoint - t.inPoint)), total);
+
   // The stretches that will not be exported, for dimming.
   const merged = normalizeRanges(selections);
   const dimGaps: { from: number; to: number }[] = [];
@@ -206,7 +269,7 @@ export function Timeline() {
   let x = 0;
   // The lane grows with the number of rows, taking the space from the viewer.
   // Sized to its contents until someone drags it, then their height wins.
-  const autoHeight = 152 + (cards.length ? laneHeight + 8 : 0);
+  const autoHeight = 152 + (cards.length ? laneHeight + 8 : 0) + (audio.length ? audioLaneH + 8 : 0);
   const userHeight = useStore((s) => s.panels.timeline);
   const timelineHeight = userHeight ?? autoHeight;
 
@@ -273,7 +336,7 @@ export function Timeline() {
         </label>
       </div>
       <div className="track-scroll" ref={trackRef} onPointerDown={onTrackPointerDown}>
-        <div className="track" style={{ width: Math.max(total * pxPerSec + 40, 100) }}>
+        <div className="track" style={{ width: Math.max(contentEnd * pxPerSec + 40, 100) }}>
           <div className="ruler" onPointerDown={startSelectionDrag} title="Drag to choose what to export">
             {ticks.map((t) => (
               <span key={t} className="tick" style={{ left: t * pxPerSec }}>{fmtTime(t).replace(/\.\d+$/, "")}</span>
@@ -382,6 +445,46 @@ export function Timeline() {
                     )}
                     {c.fadeOut > 0 && (
                       <div className="tl-card-fade out" style={{ width: Math.min(c.fadeOut * pxPerSec, w / 2) }} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {audio.length > 0 && (
+            <div className="audio-lane" style={{ height: audioLaneH }}>
+              {audio.map((t) => {
+                const len = t.outPoint - t.inPoint;
+                const left = t.start * pxPerSec;
+                const w = Math.max(len * pxPerSec, 4);
+                const row = audioRows.placed.get(t.id) ?? 0;
+                const m = media[t.mediaPath];
+                const sel = t.id === selectedAudioId;
+                return (
+                  <div
+                    key={t.id}
+                    className={"tl-audio" + (sel ? " selected" : "")}
+                    style={{ left, width: w, top: row * (AUDIO_ROW_H + 3), height: AUDIO_ROW_H }}
+                    title={`${m?.name ?? t.mediaPath} — ${fmtTime(len)}`}
+                    onPointerDown={(e) => startAudioDrag(e, t.id, "move")}
+                  >
+                    <Waveform
+                      path={t.mediaPath}
+                      inPoint={t.inPoint}
+                      outPoint={t.outPoint}
+                      duration={m?.duration ?? t.outPoint}
+                      width={w}
+                      height={AUDIO_ROW_H}
+                      selected={sel}
+                    />
+                    <div className="tl-audio-label">{m?.name ?? t.mediaPath}</div>
+                    <div className="tl-audio-handle left" onPointerDown={(e) => startAudioDrag(e, t.id, "start")} />
+                    <div className="tl-audio-handle right" onPointerDown={(e) => startAudioDrag(e, t.id, "end")} />
+                    {t.fadeIn > 0 && (
+                      <div className="tl-audio-fade in" style={{ width: Math.min(t.fadeIn * pxPerSec, w / 2) }} />
+                    )}
+                    {t.fadeOut > 0 && (
+                      <div className="tl-audio-fade out" style={{ width: Math.min(t.fadeOut * pxPerSec, w / 2) }} />
                     )}
                   </div>
                 );
