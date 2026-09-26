@@ -7,15 +7,14 @@ builds here and uploads there.
 Everything below needs a GitHub account, and two of the steps involve a
 token — do those yourself, they are not things to paste into a chat.
 
-## 1. Create the public builds repo
+## 1. The public builds repo
 
-New repo, **public**, named `bubblecut-builds` under the same account, and
-**initialise it with a README** — an empty repo has no default branch, and
-creating a release against a tag that does not exist needs one.
+`codeslayer84/BubbleCut_public` — public, already created and initialised with
+a README, which matters: an empty repo has no default branch, and creating a
+release against a tag that does not exist needs one.
 
-Replace its README with `docs/builds-repo-README.md` from this repo.
-
-If you name it something else, change `BUILDS_REPO` at the top of
+Its README comes from `docs/builds-repo-README.md` in this repo. If the repo
+is ever renamed, change `BUILDS_REPO` at the top of
 `.github/workflows/release.yml` to match.
 
 ## 2. Make a token for it
@@ -23,7 +22,7 @@ If you name it something else, change `BUILDS_REPO` at the top of
 github.com → Settings → Developer settings → **Fine-grained tokens** →
 Generate new token.
 
-- Repository access: **Only select repositories** → `bubblecut-builds`
+- Repository access: **Only select repositories** → `BubbleCut_public`
 - Permissions: **Contents: Read and write** (nothing else)
 - Expiry: whatever you are willing to renew
 
