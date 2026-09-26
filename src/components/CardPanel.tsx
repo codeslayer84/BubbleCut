@@ -18,7 +18,8 @@ export function CardPanel() {
   const playhead = useStore((s) => s.playhead);
   const clips = useStore((s) => s.clips);
   const view = useStore((s) => s.view);
-  const { addCard, updateCard, removeCard, selectCard, setPlayhead, setView } = useStore.getState();
+  const { addCard, updateCard, removeCard, selectCard, setPlayhead, setView, addTitleClip } =
+    useStore.getState();
 
   const total = timelineDuration(clips);
   const card = cards.find((c) => c.id === selectedId) ?? null;
@@ -39,7 +40,22 @@ export function CardPanel() {
 
   return (
     <div className="cards">
-      <h3>Text cards</h3>
+      <h3>Title cards</h3>
+      <p className="hint">
+        A block of flat colour dropped in at the playhead, splitting whatever is there. Its
+        words are an ordinary text card, so everything below applies to them too. Colour and
+        length are on the Edit tab once it is selected.
+      </p>
+      <div className="row">
+        <button className="primary" onClick={() => addTitleClip("Title", 3, "#000000")}>
+          + Black title card
+        </button>
+        <button onClick={() => addTitleClip("Title", 3, "#ffffff")} title="A white card instead">
+          + White
+        </button>
+      </div>
+
+      <h3>Text cards <span className="hint">over the video</span></h3>
       <p className="hint">
         Cards are placed in the 360° sphere and burned into the export, projected so they look flat
         in a headset instead of smeared across the equirectangular frame.

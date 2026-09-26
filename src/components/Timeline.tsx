@@ -18,7 +18,7 @@ export function Timeline() {
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
     selectCard, updateCard, setRightTab,
-    addSelection, updateSelection, removeSelection, clearSelections, addTitleClip,
+    addSelection, updateSelection, removeSelection, clearSelections,
     toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
@@ -215,12 +215,6 @@ export function Timeline() {
         <span className="time">{fmtTime(playhead)} / {fmtTime(total)}</span>
         <span className="spacer" />
         <button onClick={splitAtPlayhead} disabled={!clips.length} title="S">Split</button>
-        <button
-          onClick={() => addTitleClip("Title", 3, "#000000")}
-          title="Insert a black card with text at the playhead"
-        >
-          + Title
-        </button>
         <button onClick={() => selectedId && moveClip(selectedId, -1)} disabled={!selectedId} title="Move earlier">◀</button>
         <button onClick={() => selectedId && moveClip(selectedId, 1)} disabled={!selectedId} title="Move later">▶</button>
         <button onClick={() => selectedId && removeClip(selectedId)} disabled={!selectedId} title="Delete" className="danger">

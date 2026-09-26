@@ -62,6 +62,13 @@ export interface TextCard {
   radius: number;
   align: "left" | "center" | "right";
   shadow: boolean;
+  /**
+   * Set when the card belongs to a title clip. Such a card is pinned to that
+   * clip's place on the timeline rather than living at a fixed time, so it
+   * follows when the clip is lengthened, reordered, or pushed along by an
+   * edit earlier in the timeline.
+   */
+  ownerClipId?: string;
 }
 
 /** One filter in the chain, with its parameter values. */

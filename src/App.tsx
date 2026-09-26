@@ -69,9 +69,9 @@ export default function App() {
       <header>
         <div className="brand">Bubblecut</div>
         <nav>
-          {(["edit", "text", "filters", "export", "tools"] as RightTab[]).map((t) => (
+          {(["edit", "vredit", "filters", "export", "tools"] as RightTab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-              {t === "edit" ? "Edit" : t === "text" ? "Text" : t === "filters" ? "Filters"
+              {t === "edit" ? "Edit" : t === "vredit" ? "VRedit" : t === "filters" ? "Filters"
                 : t === "export" ? "Export" : "Tools"}
             </button>
           ))}
@@ -99,7 +99,7 @@ export default function App() {
         </section>
         <aside className="right">
           {tab === "edit" && <Inspector />}
-          {tab === "text" && <CardPanel />}
+          {tab === "vredit" && <CardPanel />}
           {tab === "filters" && <FilterPanel />}
           {tab === "export" && <ExportPanel />}
           {tab === "tools" && <TagTool />}

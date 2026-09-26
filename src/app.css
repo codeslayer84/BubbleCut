@@ -208,3 +208,18 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .clip.fill { background: #23262e; border-color: #3c414c; }
 .clip.fill .clip-name { color: #e8ecf5; }
 .clip.fill .clip-meta { color: #9aa3b2; }
+
+/* Export tab: pick which clips go out, without going back to the timeline. */
+.clip-picker { margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.clip-picker .picker-head { padding: 6px 8px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.clip-picker .picker-head button { padding: 2px 8px; font-size: 12px; }
+.clip-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+.clip-list li + li { border-top: 1px solid var(--border); }
+.clip-list label { display: grid; grid-template-columns: auto 1.6em 1fr auto auto; align-items: center;
+  gap: 8px; padding: 5px 8px; cursor: pointer; }
+.clip-list label:hover { background: var(--panel-2); }
+.clip-list .num { color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.clip-list .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-list .len { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.clip-list .fx { font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 0 4px; }

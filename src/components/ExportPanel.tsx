@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
+import { clipLength, fmtBytes, fmtTime, timelineDuration, useStore } from "../lib/store";
 import { selectionDuration } from "../lib/selection";
 import {
   cancelExport, ffmpegInfo, isTauri, onExportEvents, pickSavePath, revealInFinder, runExport,
@@ -40,7 +40,7 @@ export function ExportPanel() {
   const media = useStore((s) => s.media);
   const cards = useStore((s) => s.cards);
   const settings = useStore((s) => s.exportSettings);
-  const { setExportSettings } = useStore.getState();
+  const { setExportSettings, toggleClipSelected, setSelectedClips } = useStore.getState();
 
   const [info, setInfo] = useState<FfmpegInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -86,16 +86,15 @@ export function ExportPanel() {
   const [separateFiles, setSeparateFiles] = useState(false);
   const [batch, setBatch] = useState<{ index: number; of: number } | null>(null);
 
-  const effectiveScope = scope === "range" && selections.length === 0 ? "all"
-    : scope === "clips" && !canScopeClips ? "all"
-    : scope;
+  const effectiveScope = scope === "range" && selections.length === 0 ? "all" : scope;
   const activeRanges = effectiveScope === "range" ? selections : [];
   const scopedClips = effectiveScope === "clips" ? chosenClips : clips;
+  const nothingChosen = effectiveScope === "clips" && chosenClips.length === 0;
   const exportLength = effectiveScope === "clips"
     ? chosenClips.reduce((n, c) => n + (c.outPoint - c.inPoint), 0)
     : selectionDuration(clips, activeRanges);
   const running = progress !== null;
-  const canExport = isTauri && clips.length > 0 && !!settings.output && !running;
+  const canExport = isTauri && clips.length > 0 && !!settings.output && !running && !nothingChosen;
 
   const choose = async () => {
     const p = await pickSavePath(settings.output || "export_360.mp4");
@@ -250,15 +249,64 @@ export function ExportPanel() {
               ? `Marked ranges (${selections.length}) — ${fmtTime(selectionDuration(clips, selections))}`
               : "Marked ranges — drag the ruler first"}
           </option>
-          <option value="clips" disabled={!canScopeClips}>
-            {canScopeClips
-              ? `Selected clips (${chosenClips.length})`
-              : "Selected clips — Cmd-click clips first"}
+          <option value="clips">
+            {canScopeClips ? `Chosen clips (${chosenClips.length})` : "Chosen clips — pick below"}
           </option>
         </select>
       </label>
 
       {effectiveScope === "clips" && (
+        <div className="clip-picker">
+          <div className="row picker-head">
+            <span className="hint">
+              {chosenClips.length} of {clips.length} · {fmtTime(exportLength)}
+            </span>
+            <span className="spacer" />
+            <button onClick={() => setSelectedClips(clips.map((c) => c.id))}>All</button>
+            <button onClick={() => setSelectedClips([])} disabled={chosenClips.length === 0}>
+              None
+            </button>
+            <button
+              onClick={() =>
+                setSelectedClips(clips.filter((c) => !selectedIds.includes(c.id)).map((c) => c.id))
+              }
+              title="Tick what is unticked and vice versa"
+            >
+              Invert
+            </button>
+          </div>
+          <ul className="clip-list">
+            {clips.map((c, i) => {
+              const title = c.fill ? cards.find((k) => k.ownerClipId === c.id) : undefined;
+              const name = c.fill
+                ? (title?.text.split("\n")[0] ? `Title — ${title.text.split("\n")[0]}` : "Title card")
+                : (media[c.mediaPath]?.name ?? c.mediaPath.split("/").pop() ?? c.mediaPath);
+              return (
+                <li key={c.id}>
+                  <label title={c.fill ? undefined : c.mediaPath}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(c.id)}
+                      onChange={() => toggleClipSelected(c.id)}
+                    />
+                    <span className="num">{i + 1}</span>
+                    <span className="nm">{name}</span>
+                    <span className="len">{fmtTime(clipLength(c))}</span>
+                    {c.filters.length > 0 && (
+                      <span className="fx" title={c.filters.map((f) => f.name).join(", ")}>
+                        {c.filters.length} fx
+                      </span>
+                    )}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {nothingChosen && <div className="warn">Tick at least one clip.</div>}
+        </div>
+      )}
+
+      {effectiveScope === "clips" && !nothingChosen && (
         <label className="row">
           <input
             type="checkbox"
@@ -269,7 +317,7 @@ export function ExportPanel() {
         </label>
       )}
 
-      {effectiveScope === "clips" && separateFiles && (
+      {effectiveScope === "clips" && separateFiles && !nothingChosen && (
         <div className="hint sel-note">
           {chosenClips.length} files, numbered from the name above, e.g.{" "}
           <span className="mono">{(settings.output.replace(/\.[^.]+$/, "") || "output") + "_01.mp4"}</span>.
