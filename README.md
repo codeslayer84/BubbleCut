@@ -67,12 +67,6 @@ decode/encode step.
 - Save / open projects (`*.360edit.json`).
 
 
-Check what certificates you have with:
-
-```bash
-security find-identity -v -p codesigning
-```
-
 ## Requirements
 
 - macOS (Linux/Windows should work but are untested)
@@ -86,17 +80,6 @@ security find-identity -v -p codesigning
   or the directory named by `BUBBLECUT_FFMPEG_DIR`
 - Node 22 (`.nvmrc`), Rust stable
 
-## Run
-
-```bash
-npm install
-npm run tauri dev
-```
-
-Browser-only UI dev (no export): `npm run dev` then open
-<http://localhost:1420/?dev> — loads a labelled test clip from `public/dev/`.
-
-Rust tests (need ffmpeg): `cd src-tauri && cargo test`.
 
 ## Keyboard
 
