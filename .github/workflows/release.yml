@@ -8,13 +8,6 @@ name: Release
 # no release for the tag, both make one, and the artifacts end up split across
 # two drafts.
 #
-# The source repo is private; the builds are not. Everything is built here and
-# the artifacts are pushed to a separate public repo (BUILDS_REPO) whose only
-# contents are releases, so a download link can be shared without the source.
-# That needs a BUILDS_TOKEN secret: a fine-grained PAT with Contents:
-# read+write on the builds repo only. Without it the workflow stops before
-# building rather than quietly publishing nowhere.
-#
 # Push a tag to publish:
 #   git tag v0.1.0 && git push origin v0.1.0
 
@@ -23,10 +16,6 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-
-env:
-  # Public, releases only. Change here if it is ever renamed.
-  BUILDS_REPO: codeslayer84/BubbleCut_public
 
 jobs:
   create-release:
@@ -38,16 +27,6 @@ jobs:
       can_sign_mac: ${{ steps.signing.outputs.mac }}
     steps:
       - uses: actions/checkout@v4
-
-      # Fail here rather than after a 20-minute matrix build.
-      - name: Check the builds-repo token is present
-        env:
-          BUILDS_TOKEN: ${{ secrets.BUILDS_TOKEN }}
-        run: |
-          if [ -z "$BUILDS_TOKEN" ]; then
-            echo "::error::No BUILDS_TOKEN secret. Add a fine-grained PAT with Contents: read+write on $BUILDS_REPO."
-            exit 1
-          fi
 
       # An unsigned macOS build is worse than none: it overwrites a notarised
       # one uploaded by hand, and anyone downloading it meets Gatekeeper.
@@ -67,9 +46,7 @@ jobs:
         id: create
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.BUILDS_TOKEN }}
           script: |
-            const [owner, repo] = process.env.BUILDS_REPO.split('/');
             const tag = context.ref.replace('refs/tags/', '');
             const body = [
               'Desktop builds of Bubblecut.',
@@ -110,10 +87,12 @@ jobs:
             // making a second one.
             let release;
             try {
-              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              release = (await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner, repo: context.repo.repo, tag,
+              })).data;
             } catch (e) {
               release = (await github.rest.repos.createRelease({
-                owner, repo,
+                owner: context.repo.owner, repo: context.repo.repo,
                 tag_name: tag, name: `Bubblecut ${tag.replace(/^v/, '')}`,
                 body, draft: true, prerelease: false,
               })).data;
@@ -210,37 +189,13 @@ jobs:
           carry WINDOWS_CERTIFICATE_PASSWORD "$WINDOWS_CERTIFICATE_PASSWORD"
           echo "Anything not listed above is unset, so that part stays ad-hoc signed."
 
-      # tauri-action uploads only into the repo it runs in, and that repo is
-      # the private one, so it just builds here.
-      - name: Build
-        id: tauri
+      - name: Build and upload into the release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
-
-      - name: Upload the bundles to the public builds repo
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.BUILDS_TOKEN }}
-          ARTIFACTS: ${{ steps.tauri.outputs.artifactPaths }}
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF#refs/tags/}"
-          # artifactPaths is a JSON array of absolute paths. jq is on all three
-          # runner images; xargs -a/-d are GNU-only, so loop instead.
-          echo "$ARTIFACTS" | jq -r '.[]' > paths.txt
-          if [ ! -s paths.txt ]; then
-            echo "::error::tauri-action produced no artifacts"
-            exit 1
-          fi
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            echo "uploading $(basename "$f")"
-            # --clobber so re-running a tag replaces rather than errors.
-            gh release upload "$tag" "$f" --repo "$BUILDS_REPO" --clobber
-          done < paths.txt
 
   publish-release:
     needs: [create-release, build]
@@ -251,11 +206,9 @@ jobs:
       - name: Publish once every platform has uploaded
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.BUILDS_TOKEN }}
           script: |
-            const [owner, repo] = process.env.BUILDS_REPO.split('/');
             await github.rest.repos.updateRelease({
-              owner, repo,
+              owner: context.repo.owner, repo: context.repo.repo,
               release_id: ${{ needs.create-release.outputs.release_id }},
               draft: false,
             });
