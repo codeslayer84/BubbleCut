@@ -36,7 +36,7 @@ nav button { border: none; background: transparent; padding: 5px 12px; color: va
 nav button.active { background: var(--panel-2); color: var(--fg); }
 .project { display: flex; gap: 6px; align-items: center; }
 
-main { display: grid; grid-template-columns: 240px 1fr 340px; flex: 1; min-height: 0; }
+main { display: grid; grid-template-columns: 240px 0 1fr 0 340px; flex: 1; min-height: 0; }
 aside { background: var(--panel); overflow: auto; padding: 10px; }
 aside.left { border-right: 1px solid var(--border); }
 aside.right { border-left: 1px solid var(--border); }
@@ -49,11 +49,11 @@ aside.right { border-left: 1px solid var(--border); }
 .viewer-reticle::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px; background: #fff; border-radius: 50%; }
 .viewer-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 15px; pointer-events: none; }
 
-.timeline { height: 232px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
+.timeline { height: 232px; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
 .timeline-toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .timeline-toolbar .time { font-variant-numeric: tabular-nums; color: var(--muted); }
 .timeline-toolbar .zoom { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.track-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; position: relative; cursor: text; }
+.track-scroll { flex: 1; overflow-x: auto; overflow-y: auto; position: relative; cursor: text; }
 .track { position: relative; height: 100%; padding-left: 10px; }
 .ruler { position: relative; height: 20px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .tick { position: absolute; top: 3px; border-left: 1px solid var(--border); padding-left: 3px; }
@@ -223,3 +223,14 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .clip-list .len { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .clip-list .fx { font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
   border-radius: 4px; padding: 0 4px; }
+
+/* Drag handles between panes. The strip is 6px but the grid gives it 0, so it
+   straddles the border instead of shifting the layout when it appears. */
+.splitter { position: relative; z-index: 5; background: transparent; }
+.splitter.col { width: 9px; margin: 0 -4px; cursor: col-resize; }
+.splitter.row { height: 9px; margin: -5px 0 -4px; cursor: row-resize; flex: 0 0 auto; }
+.splitter:hover, .splitter:focus-visible { background: var(--accent); opacity: .5; outline: none; }
+.splitter:focus-visible { opacity: .8; }
+/* Whatever is under the cursor mid-drag must not fight it for the cursor. */
+body.resizing-col, body.resizing-col * { cursor: col-resize !important; user-select: none; }
+body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-select: none; }

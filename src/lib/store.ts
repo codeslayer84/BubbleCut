@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { loadPresets, savePresets, type FilterPreset } from "./presets";
+import { clampPanel, loadPanels, PANEL_DEFAULTS, savePanels, type PanelSizes } from "./layout";
 import type { Clip, ExportSettings, MediaInfo, ProjectFile, TextCard } from "./types";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
@@ -105,6 +106,9 @@ interface State {
   moveClip: (id: string, dir: -1 | 1) => void;
   splitAtPlayhead: () => void;
   selectClip: (id: string | null) => void;
+  panels: PanelSizes;
+  setPanel: (which: keyof PanelSizes, px: number) => void;
+  resetPanel: (which: keyof PanelSizes) => void;
   toggleClipSelected: (id: string) => void;
   setSelectedClips: (ids: string[]) => void;
   selectClipRange: (id: string) => void;
@@ -414,6 +418,20 @@ export const useStore = create<State>((set, get) => ({
   selectClip: (id) => set({ selectedClipId: id, selectedClipIds: id ? [id] : [] }),
 
   // Cmd- or Ctrl-click: add or remove one clip.
+  panels: loadPanels(),
+  setPanel: (which, px) =>
+    set((s) => {
+      const panels = { ...s.panels, [which]: clampPanel(which, px) };
+      savePanels(panels);
+      return { panels };
+    }),
+  resetPanel: (which) =>
+    set((s) => {
+      const panels = { ...s.panels, [which]: PANEL_DEFAULTS[which] };
+      savePanels(panels);
+      return { panels };
+    }),
+
   toggleClipSelected: (id) =>
     set((s) => {
       const has = s.selectedClipIds.includes(id);

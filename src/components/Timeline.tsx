@@ -1,3 +1,5 @@
+import { Splitter } from "./Splitter";
+import { PANEL_LIMITS } from "../lib/layout";
 import { useEffect, useRef, useState } from "react";
 import { cardOpacity } from "../lib/cardRender";
 import { normalizeRanges, selectionDuration } from "../lib/selection";
@@ -18,7 +20,7 @@ export function Timeline() {
   const {
     setPlayhead, setPlaying, selectClip, updateClip, removeClip, moveClip, splitAtPlayhead,
     selectCard, updateCard, setRightTab,
-    addSelection, updateSelection, removeSelection, clearSelections,
+    addSelection, updateSelection, removeSelection, clearSelections, setPanel, resetPanel,
     toggleClipSelected, selectClipRange,
   } = useStore.getState();
 
@@ -203,10 +205,20 @@ export function Timeline() {
 
   let x = 0;
   // The lane grows with the number of rows, taking the space from the viewer.
-  const timelineHeight = 152 + (cards.length ? laneHeight + 8 : 0);
+  // Sized to its contents until someone drags it, then their height wins.
+  const autoHeight = 152 + (cards.length ? laneHeight + 8 : 0);
+  const userHeight = useStore((s) => s.panels.timeline);
+  const timelineHeight = userHeight ?? autoHeight;
 
   return (
     <div className="timeline" style={{ height: timelineHeight }}>
+      <Splitter
+        axis="row" label="Timeline height" invert
+        value={timelineHeight}
+        min={PANEL_LIMITS.timeline.min} max={PANEL_LIMITS.timeline.max}
+        onChange={(px) => setPanel("timeline", px)}
+        onReset={() => resetPanel("timeline")}
+      />
       <div className="timeline-toolbar">
         <button onClick={() => setPlaying(!playing)} disabled={!clips.length} title="Space">
           {playing ? "❚❚ Pause" : "▶ Play"}

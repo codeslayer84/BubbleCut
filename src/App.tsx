@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Splitter } from "./components/Splitter";
 import { Viewer } from "./components/Viewer";
 import { Timeline } from "./components/Timeline";
+import { fitToWidth, PANEL_LIMITS } from "./lib/layout";
 import { Inspector } from "./components/Inspector";
 import { MediaBin } from "./components/MediaBin";
 import { ExportPanel } from "./components/ExportPanel";
@@ -20,6 +22,17 @@ export default function App() {
   const setTab = useStore((s) => s.setRightTab);
   const projectPath = useStore((s) => s.projectPath);
   const dirty = useStore((s) => s.dirty);
+  const saved = useStore((s) => s.panels);
+  const { setPanel, resetPanel } = useStore.getState();
+  // The window can end up narrower than the panels saved in it, so the sides
+  // give way to the viewer on every render rather than only when dragged.
+  const [winW, setWinW] = useState(window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const panels = fitToWidth(saved, winW);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -89,15 +102,25 @@ export default function App() {
         )}
       </header>
 
-      <main>
-        <aside className="left">
+      <main style={{ gridTemplateColumns: `${panels.left}px 0 1fr 0 ${panels.right}px` }}>
+        <aside className="left" style={{ width: panels.left }}>
           <MediaBin />
         </aside>
+        <Splitter
+          axis="col" label="Media bin width"
+          value={panels.left} min={PANEL_LIMITS.left.min} max={PANEL_LIMITS.left.max}
+          onChange={(px) => setPanel("left", px)} onReset={() => resetPanel("left")}
+        />
         <section className="center">
           <Viewer />
           <Timeline />
         </section>
-        <aside className="right">
+        <Splitter
+          axis="col" label="Side panel width" invert
+          value={panels.right} min={PANEL_LIMITS.right.min} max={PANEL_LIMITS.right.max}
+          onChange={(px) => setPanel("right", px)} onReset={() => resetPanel("right")}
+        />
+        <aside className="right" style={{ width: panels.right }}>
           {tab === "edit" && <Inspector />}
           {tab === "vredit" && <CardPanel />}
           {tab === "filters" && <FilterPanel />}
